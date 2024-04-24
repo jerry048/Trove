@@ -58,6 +58,7 @@ read webhook
 
 # Sanity check for Discord webhook URL
 while true
+do
 	if [[ ! $webhook =~ ^https://discord.com/api/webhooks/[0-9]+/[a-zA-Z0-9_-]+$ ]]
 	then
 		echo "Invalid Discord webhook URL. Please enter a valid Discord webhook URL."
