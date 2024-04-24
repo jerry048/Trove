@@ -72,4 +72,4 @@ done
 wget -O /tmp/hostbrr_monit.py https://raw.githubusercontent.com/jerry048/Trove/main/HostBrr-StockMonit/hostbrr_monit.py
 
 # Create a screen session
-screen -dmS hostbbr-stock-checker python3 /tmp/stock.py $webhook
+screen -dmS hostbbr-stock-checker python3 /tmp/hostbrr_monit.py $webhook
