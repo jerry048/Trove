@@ -3,23 +3,27 @@ import requests
 import time
 import sys
 
-# Check arguments for webhook URL
+# Discord webhook URL
 webhook_url = sys.argv[1] if len(sys.argv) > 1 else None
 if webhook_url is None:
     print("Please provide a Discord webhook URL as an argument.")
     sys.exit(1)
-else:
-    print(f"Webhook URL: {webhook_url}")
+webhook_data = {
+    'username': 'HostBRR Product Monitor',
+    'content': "HostBRR Product Monitor is now running. 🚀"
+}
+requests.post(webhook_url, json=webhook_data)
+
+# Initial variables
 url = 'https://my.hostbrr.com/order/main/packages/anniversary/?group_id=59'
-response = requests.get(url)
-soup = bs(response.text, 'html.parser')
-
-
-# List to hold all product information
 original_product_info = []
+counter = 0
 
+# Main loop
 while True:
     product_info = []
+    response = requests.get(url)
+    soup = bs(response.text, 'html.parser')
     packages = soup.find_all('div', class_='package-boxes')
     for package in packages:
         package_name = package.find('h4').text.strip()  # Product name
@@ -45,9 +49,9 @@ while True:
         })
 
     # Check if the product information has changed
-    if product_info != original_product_info:
-        # Send a Discord webhook with the new product information
-        for product in product_info:
+    for product in product_info:
+        if product not in original_product_info:
+            print(f"New product found! {product['Package Name']}")
             webhook_data = {
                 'username': 'HostBRR Product Monitor',
                 'content': "**New Product Found !!**  🎉",
@@ -61,16 +65,8 @@ while True:
                 ]
             }
             requests.post(webhook_url, json=webhook_data)
-        # Update the original product information
-        original_product_info = product_info
+    # Update the original product information
+    original_product_info = product_info
+    counter += 1
+    print(f"Checked at {time.strftime('%H:%M:%S')} - {counter} times")
     time.sleep(10)
-
-
-
-
-
-
-
-
-
-
