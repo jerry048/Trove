@@ -10,6 +10,7 @@ if webhook_url is None:
     sys.exit(1)
 else:
     print(f"Webhook URL: {webhook_url}")
+url = 'https://my.hostbrr.com/order/main/packages/anniversary/?group_id=59'
 response = requests.get(url)
 soup = bs(response.text, 'html.parser')
 
