@@ -186,7 +186,7 @@ bbr_obj=$bbr_file.o
 # Detect if the module is already installed
 if [ -d /var/lib/dkms/$algo ]; then
 	info "检测到现有的 $algo 拥塞控制模块."
-	info_2 "正在卸载现有的 $algo 拥塞控制模块..."
+	info_2 "正在卸载并重装 $algo 拥塞控制模块..."
 	dkms remove -m $algo/$trimmed_kernel_ver --all &> /dev/null
 	if [ ! $? -eq 0 ]; then
 		fail "错误: 卸载失败"
