@@ -991,9 +991,7 @@ static void bbr_update_gains(struct sock *sk)
 		bbr->cwnd_gain	 = bbr_high_gain;
 		break;
 	case BBR_DRAIN:
-		bbr->pacing_gain = (bbr->lt_use_bw ?
-				    BBR_UNIT :
-				    bbr_pacing_gain[bbr->cycle_idx]);	/* slow, to drain */
+		bbr->pacing_gain = bbr_drain_gain;	/* slow, to drain */
 		bbr->cwnd_gain	 = bbr_high_gain;	/* keep cwnd */
 		break;
 	case BBR_PROBE_BW:
