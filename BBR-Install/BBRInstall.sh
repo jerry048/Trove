@@ -40,7 +40,7 @@ seperator
 info "正在更新系统..."
 apt-get update -y &> /dev/null
 apt-get upgrade -y &> /dev/null
-seperator
+info_2 "系统更新完成."
 
 ## System Info
 sysinfo_(){
@@ -81,6 +81,8 @@ sysinfo_(){
 
 ## Check if the script is run on a supported OS
 sysinfo_
+seperator
+info "正在检查系统..."
 if [ "$os" != "Ubuntu" ] && [ "$os" != "Debian" ]; then
 	fail "错误: 本脚本仅支持Ubuntu/Debian系统."
 	exit 1
@@ -155,30 +157,37 @@ if [ ! -x /usr/sbin/dkms ]; then
 		exit 1
 	fi
 fi
+info_2 "系统支持检查通过."
 
 ## Download the Modified BBR source code
+seperator
+info "正在下载 $algo 拥塞控制模块源代码..."
 mkdir -p $HOME/.bbr/src && cd $HOME/.bbr/src
 if [ ! -d $HOME/.bbr/src ]; then
 	fail "错误: 创建目录失败."
 	exit 1
 fi
-wget -O $HOME/.bbr/src/tcp_$algo.c https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBR/$trimmed_kernel_ver/tcp_$algo.c
+wget -O $HOME/.bbr/src/tcp_$algo.c https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBR/$trimmed_kernel_ver/tcp_$algo.c &> /dev/null
 if [ ! -f $HOME/.bbr/src/tcp_$algo.c ]; then
 	fail "错误: 下载源代码失败."
 	exit 1
 fi
+info_2 "源代码下载完成."
+
 
 ## This part of the script is modified from https://github.com/KozakaiAya/TCP_BBR
 ## Compile and install
+seperator
 info "正在编译并安装 $algo 拥塞控制模块..."
 bbr_file=tcp_$algo
 bbr_src=$bbr_file.c
 bbr_obj=$bbr_file.o
 
 # Detect if the module is already installed
-if [ -f /lib/modules/6.8.0-41-generic/updates/dkms/$bbr_file.ko ]; then
-	info "正在卸载现有的 $algo 拥塞控制模块..."
-	dkms remove -m $algo/$trimmed_kernel_ver --all
+if [ -d /var/lib/dkms/$algo ]; then
+	info "检测到现有的 $algo 拥塞控制模块."
+	info_2 "正在卸载现有的 $algo 拥塞控制模块..."
+	dkms remove -m $algo/$trimmed_kernel_ver --all &> /dev/null
 	if [ ! $? -eq 0 ]; then
 		fail "错误: 卸载失败"
 		exit 1
@@ -219,21 +228,21 @@ EOF
 # Start dkms install
 cp -R . /usr/src/$algo-$trimmed_kernel_ver
 
-dkms add -m $algo -v $trimmed_kernel_ver
+dkms add -m $algo -v $trimmed_kernel_ver &> /dev/null
 if [ ! $? -eq 0 ]; then
     dkms remove -m $algo/$trimmed_kernel_ver --all
 	fail "错误: DKMS 无法添加内核模块"
 	exit 1
 fi
 
-dkms build -m $algo -v $trimmed_kernel_ver
+dkms build -m $algo -v $trimmed_kernel_ver &> /dev/null
 if [ ! $? -eq 0 ]; then
     dkms remove -m $algo/$trimmed_kernel_ver --all
 	fail "Error: 构建 DKMS 模块失败"
     exit 1
 fi
 
-dkms install -m $algo -v $trimmed_kernel_ver
+dkms install -m $algo -v $trimmed_kernel_ver &> /dev/null
 if [ ! $? -eq 0 ]; then
     dkms remove -m $algo/$trimmed_kernel_ver --all
 	fail "Error: DKMS 无法安装内核模块"
@@ -255,8 +264,8 @@ if [ ! $? -eq 0 ]; then
 fi
 
 # Check if the module is loaded
+seperator
 if lsmod | grep -q $bbr_file; then
-	seperator
 	info "$algo 拥塞控制模块已成功安装! 无需重启即可生效."
 else
 	dkms remove -m $algo/$trimmed_kernel_ver --all
