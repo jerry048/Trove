@@ -36,8 +36,11 @@ if [ "$(id -u)" != "0" ]; then
 fi
 
 ## System Update
+seperator
+info "正在更新系统..."
 apt-get update -y &> /dev/null
 apt-get upgrade -y &> /dev/null
+seperator
 
 ## System Info
 sysinfo_(){
@@ -167,6 +170,7 @@ fi
 
 ## This part of the script is modified from https://github.com/KozakaiAya/TCP_BBR
 ## Compile and install
+info "正在编译并安装 $algo 拥塞控制模块..."
 bbr_file=tcp_$algo
 bbr_src=$bbr_file.c
 bbr_obj=$bbr_file.o
@@ -252,6 +256,7 @@ fi
 
 # Check if the module is loaded
 if lsmod | grep -q $bbr_file; then
+	seperator
 	info "$algo 拥塞控制模块已成功安装! 无需重启即可生效."
 else
 	dkms remove -m $algo/$trimmed_kernel_ver --all
