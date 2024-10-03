@@ -1,25 +1,6 @@
 #!/bin/bash
 clear
 
-## Choose the congestion control algorithm
-info "请选择要安装的拥塞控制算法:"
-select algo in "bbrx" "bbrw" "attack"; do
-	case $algo in
-		bbrx|bbrw|attack)
-			break
-			;;
-		*)
-			fail "错误: 无效的选择."
-			;;
-	esac
-done
-
-## Ensure the script is run as root
-if [ "$(id -u)" != "0" ]; then
-	echo "脚本需要root运行." 1>&2
-	exit 1
-fi
-
 ## Text colors and styles
 info() {
 	echo -e "\e[92m$1\e[0m"
@@ -34,6 +15,25 @@ seperator() {
 	echo -e "\n"
 	echo $(printf '%*s' "$(tput cols)" | tr ' ' '=')
 }
+
+## Choose the congestion control algorithm
+info "请选择要安装的拥塞控制算法:"
+select algo in "bbrx" "bbrw" "attack"; do
+	case $algo in
+			bbrx|bbrw|attack)
+			break
+			;;
+		*)
+			fail "错误: 无效的选择."
+			;;
+	esac
+done
+
+## Ensure the script is run as root
+if [ "$(id -u)" != "0" ]; then
+	echo "脚本需要root运行." 1>&2
+	exit 1
+fi
 
 ## System Update
 apt-get update -y &> /dev/null
@@ -96,7 +96,7 @@ if [ "$os" == "Debian" ]; then
 fi
 
 ## Check if the script is run on a supported kernel version
-trimmed_kernel_ver=$(echo $kernel_ver | cut -d'-' -f1)
+trimmed_kernel_ver=$(echo $kernel | cut -d'-' -f1)
 if [ "$trimmed_kernel_ver" != "5.10.0" ] && [ "$trimmed_kernel_ver" != "5.15.0" ] && [ "$trimmed_kernel_ver" != "6.1.0" ] && [ "$trimmed_kernel_ver" != "6.8.0" ]; then
 	fail "错误: 本脚本仅支持内核版本 [5.10.0, 5.15.0, 6.1.0, 6.8.0]"
 	exit 1
