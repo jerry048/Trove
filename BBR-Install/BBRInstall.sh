@@ -160,7 +160,7 @@ if [ ! -d $HOME/.bbr/src ]; then
 	exit 1
 fi
 wget -O $HOME/.bbr/src/$algo.c https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBR/$trimmed_kernel_ver/tcp_$algo.c
-if [ ! -f $HOME/.bbr/src/$algo.c ]; then
+if [ ! -f $HOME/.bbr/src/tcp_$algo.c ]; then
 	fail "错误: 下载脚本失败."
 	exit 1
 fi
