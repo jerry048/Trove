@@ -176,7 +176,7 @@ bbr_src=$bbr_file.c
 bbr_obj=$bbr_file.o
 
 # Detect if the module is already installed
-if [ -f /lib/modules/$trimmed_kernel_ver/updates/net/ipv4/$bbr_file.ko ]; then
+if [ -f /lib/modules/6.8.0-41-generic/updates/dkms/$bbr_file.ko ]; then
 	info "正在卸载现有的 $algo 拥塞控制模块..."
 	dkms remove -m $algo/$trimmed_kernel_ver --all
 	if [ ! $? -eq 0 ]; then
