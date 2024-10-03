@@ -159,12 +159,11 @@ if [ ! -d $HOME/.bbr/src ]; then
 	fail "错误: 创建目录失败."
 	exit 1
 fi
-wget -O $HOME/.bbr/src/$algo.c https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBR/$trimmed_kernel_ver/tcp_$algo.c
+wget -O $HOME/.bbr/src/tcp_$algo.c https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBR/$trimmed_kernel_ver/tcp_$algo.c
 if [ ! -f $HOME/.bbr/src/tcp_$algo.c ]; then
-	fail "错误: 下载脚本失败."
+	fail "错误: 下载源代码失败."
 	exit 1
 fi
-
 
 ## This part of the script is modified from https://github.com/KozakaiAya/TCP_BBR
 ## Compile and install
@@ -183,8 +182,6 @@ if [ -f /lib/modules/$trimmed_kernel_ver/updates/net/ipv4/$bbr_file.ko ]; then
 fi
 
 ## Compile the module
-cd $HOME/.bbr/src
-
 # Create Makefile
 cat > ./Makefile << EOF
 obj-m:=$bbr_obj
