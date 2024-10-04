@@ -83,19 +83,19 @@ sysinfo_(){
 sysinfo_
 seperator
 info "正在检查系统..."
-if [ "$os" != "Ubuntu" ] && [ "$os" != "Debian" ]; then
+if [[ ! "$os" =~ "Ubuntu" ]] && [[ ! "$os" =~ "Debian" ]]; then
 	fail "错误: 本脚本仅支持Ubuntu/Debian系统."
 	exit 1
 fi
-if [ "$os" == "Ubuntu" ]; then
-	if [ "$ver" != "24.04" ] && [ "$ver" != "22.04" ]; then
-		fail "错误: 本脚本仅支持Ubuntu 24.04/22.04系统."
+if [[ "$os" =~ "Ubuntu" ]]; then
+	if [[ ! "$ver" =~ "22" ]] && [[ ! "$ver" =~ "24" ]]; then
+		fail "错误: 本脚本仅支持Ubuntu 22.04/24.04系统."
 		exit 1
 	fi
 fi
-if [ "$os" == "Debian" ]; then
-	if [ "$ver" != "12" ] && [ "$ver" != "11" ]; then
-		fail "警告: 本脚本仅支持Debian 12/11系统."
+if [[ "$os" =~ "Debian" ]]; then
+	if [[ ! "$ver" =~ "11" ]] && [[ ! "$ver" =~ "12" ]]; then
+		fail "警告: 本脚本仅支持Debian 11/12系统."
 		exit 1
 	fi
 fi
