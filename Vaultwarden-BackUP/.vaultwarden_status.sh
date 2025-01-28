@@ -23,16 +23,26 @@ else
 fi
 
 # Check if the main Vaultwarden URL is down
-if ! curl --silent --head "https://$DOMAIN" | grep "200 OK" > /dev/null; then
-    curl -X PUT "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records/$CF_RECORD_ID" \
-        -H "Authorization: Bearer $CF_API_KEY" \
+if ! curl --silent --head "https://$DOMAIN" | grep "200" > /dev/null; then
+    # Update the DNS record to point to the backup IP address
+    curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records/$CF_RECORD_ID" \
+        -H "Authorization: Bearer $
+        CF_API_KEY" \
         -H "Content-Type: application/json" \
-        --data '{"type":"'"$BACKUP_IP_TYPE"'","name":"'"$DOMAIN"'","content":"'"$BACKUP_IP"'","ttl":1,"proxied":true}'
-
-    # Append new configuration to the Caddyfile
-    echo "" >> $CADDYFILE
-    echo "$DOMAIN {" >> $CADDYFILE
-    echo "        reverse_proxy localhost:$VW_PORT" >> $CADDYFILE
-    echo "}" >> $CADDYFILE
-    caddy reload
+        --data "{\"type\":\"$BACKUP_IP_TYPE\",\"name\":\"$DOMAIN\",\"content\":\"$BACKUP_IP\",\"ttl\":1,\"proxied\":true}"
+    # Start Cadddy
+    systemctl start caddy
 fi
+
+# Check if the main Vaultwarden URL is up
+if curl --silent --head "https://$DOMAIN" | grep "200" > /dev/null; then
+    # Update the DNS record to point to the main IP address
+    curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records/$CF_RECORD_ID" \
+        -H "Authorization: Bearer $
+        CF_API_KEY" \
+        -H "Content-Type: application/json" \
+        --data "{\"type\":\"$BACKUP_IP_TYPE\",\"name\":\"$DOMAIN\",\"content\":\"$MAIN_IP\",\"ttl\":1,\"proxied\":true}"
+    # Stop Caddy
+    systemctl stop caddy
+fi
+
