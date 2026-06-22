@@ -20,7 +20,7 @@ RAW_BASE="https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-I
 
 ## Choose the congestion control algorithm
 info "请选择要安装的拥塞控制算法:"
-select algo in "BBRv3" "BBRx" "BBRw" "BBR_brutal"  "BBRw_brutal"; do
+select algo in "bbrv3" "bbrx" "bbrw" "bbr_brutal"  "bbrw_brutal"; do
 	case $algo in
 		bbrv3|bbrx|bbrw|bbr_brutal|bbrw_brutal)
 			break
