@@ -1,147 +1,345 @@
+# BBRInstall
 
-# BBR 拥塞控制算法安装脚本
+A Debian/Ubuntu installer for BBR-family TCP congestion-control algorithms.
 
-## 简介
 
-欢迎使用 **BBR 拥塞控制算法安装脚本**！本脚本旨在帮助用户轻松在 Ubuntu 和 Debian 系统上安装和配置不同版本的 BBR 拥塞控制算法（如 bbrx、bbrw、attack），以优化网络性能。
+- **`bbrv3`**: installs a prebuilt Linux kernel image and matching headers package, then configures the kernel congestion-control setting to `bbr`.
+- **`bbrx`, `bbrw`, `bbr_brutal`, `bbrw_brutal`**: downloads the selected module source, builds it with DKMS for the currently running kernel, loads the module, enables autoload at boot, and configures the selected algorithm.
 
-## 前提条件
-
-- **操作系统**：Ubuntu 22.04 / 24.04 或 Debian 11 / 12
-- **内核版本**：5.10.0、5.15.0、6.1.0 或 6.8.0
-- **权限**：需要以 root 用户或具有 sudo 权限的用户运行脚本
-
-## 安装步骤
-
-1. 使用此脚本前，请确保您具有root权限。脚本的使用方式如下：
-
-  ```bash
-  bash <(wget -qO- https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBRInstall.sh)
-  ```
-
-2. 选择要安装的 BBR 拥塞控制算法（`bbrx`、`bbrw`、`attack`）
-3. 如果系统缺少对应内核版本的头文件，脚本将自动安装新内核并提示重启。
-4. 安装完成后，无需重启即可生效。如果遇到需要重新启动的情况，请根据提示操作。
-
-## BBR 版本简介
-### BBRw
-当网络延迟增加时，传统BBR会根据提供的代码做出以下反应：
-
-1. **维护最小RTT估计：**
-   - BBR跟踪在一个滑动窗口（10秒，`bbr_min_rtt_win_sec`）内观察到的最小RTT延迟（`min_rtt_us`）。
-   - 只有当新的RTT样本小于当前的`min_rtt_us`或者最小RTT过滤窗口过期时，才会更新`min_rtt_us`。 
-   - 如果最小RTT过滤窗口过期（即在过去10秒内没有新的最小RTT），BBR会转换到`BBR_PROBE_RTT` 模式来测试RTT提升是纯粹的传播延迟还是由于队列积压引起的延时。
-
-   ```c
-   static void bbr_update_min_rtt(struct sock *sk, const struct rate_sample *rs)
-   {
-       struct tcp_sock *tp = tcp_sk(sk);
-       struct bbr *bbr = inet_csk_ca(sk);
-       bool filter_expired;
-
-       // 检查最小RTT窗口是否已过期（超过10秒）
-       filter_expired = after(tcp_jiffies32,
-                      bbr->min_rtt_stamp + bbr_min_rtt_win_sec * HZ);
-
-       // 如果观察到更小的RTT或过滤器已过期且没有ACK延迟，则更新最小RTT
-       if (rs->rtt_us >= 0 &&
-           (rs->rtt_us < bbr->min_rtt_us ||
-            (filter_expired && !rs->is_ack_delayed))) {
-           bbr->min_rtt_us = rs->rtt_us;
-           bbr->min_rtt_stamp = tcp_jiffies32;
-       }
-       ...
-   }
-   ```
-
-2. **进入PROBE_RTT模式：**
-   - 在`BBR_PROBE_RTT`模式下，BBR将其拥塞窗口减少到最小值，减速至~6Kbps 左右（通常为4个数据包，`bbr_cwnd_min_target`），至少维持200毫秒（`bbr_probe_rtt_mode_ms`）。
-   - 这一过程促使别人的流分享你空出来的带宽，避免了单个流独占大量带宽或形成长队列的情况。
-   ```c
-   if (bbr_probe_rtt_mode_ms > 0 && filter_expired &&
-       !bbr->idle_restart && bbr->mode != BBR_PROBE_RTT) {
-       bbr->mode = BBR_PROBE_RTT;  // 进入PROBE_RTT模式
-       bbr_save_cwnd(sk);  // 保存当前cwnd以便稍后恢复
-       bbr->probe_rtt_done_stamp = 0;
-   }
-   ```
-
-### BBRw 对比原版BBR阉割了这个行为
-
-### 1. 追踪最大RTT
-
-- **跟踪最大RTT：** 修改后的BBR不再追踪最小RTT而是在观察到更大的RTT时更新`min_rtt_us`变量。 如果在10秒内没有发现延迟提升，我们可以理解为没有队列积压并进入Probe RTT模式更激进的抢带宽。
-
-### **2. 在Probe RTT模式下增加了节奏和拥塞窗口增益**
-
-- **Probe RTT模式下更高的增益：** 修改后的BBR在`BBR_PROBE_RTT`模式下将`pacing_gain`和`cwnd_gain`均设置为`bbr_high_gain`，算法持续以激进的方式发送数据，即使在原始BBR会降低发送速率的阶段，也可能保持高吞吐量。
-- **使用先前的拥塞窗口：** 修改后的BBR在进入`BBR_PROBE_RTT`模式时使用不会减速到固定的最小值`bbr_cwnd_min_target`。这意味着在Probe RTT期间并不会减速。
-
-### **总体性能影响**
-
-修改后的BBR算法通过在RTT测量和探测阶段调整节奏和拥塞窗口增益，变得更加激进。算法对拥塞信号（如RTT增加）的敏感性降低。特别是在共享或容量有限的网络中，激进的行为可能导致带宽共享不公平，可能使其他连接受到饥饿。
+> **Warning**
+>
+> This script changes kernel-level networking behavior and must run as `root`. Review the script and the upstream source location before running it on a production host.
 
 ---
-### Attack
-#### 在BBRw的前提下， Attack做了更激进的修改
+## Supported systems
 
-### 主要修改点：
+| Platform | Supported versions
+|---|---|
+| Debian | 11, 12, 13
+| Ubuntu | 22.04, 24.04, 26.04
 
-1. **忽略数据包丢失：**
-   - **禁用数据包保守原则：** 修改后的BBR移除了数据包保守原则。在函数 `bbr_set_cwnd_to_recover_or_restore()` 中，算法不再因数据包丢失而减少拥塞窗口（`cwnd`）。相反，它会维持或增加 `cwnd`，无论网络状况如何。
-   - **丢包时不调整状态：** 函数 `bbr_set_state()` 实际上被禁用，这意味着算法在进入丢包状态（`TCP_CA_Loss`）时不会调整其行为。
+Runtime support:
 
-2. **禁用长期带宽采样：**
-   - **不进行警察检测：** 函数 `bbr_lt_bw_sampling()` 被禁用，这意味着算法不再执行长期带宽采样以检测和适应网络警察（QoS）。这种遗漏阻止了算法根据持续的拥塞信号调整其行为。
+- Bare-metal hosts and full virtual machines are expected to work.
+- Containers are blocked by default because they share the host kernel.
+- WSL is blocked by default because this type of kernel/DKMS installation is not appropriate there.
+- `--force-runtime` exists for testing or unusual environments, but it should not be used on production systems unless you understand the kernel/runtime boundary.
 
-5. **简化周期阶段转换：**
-   - **在周期决策中忽略丢包：** 在决定是否推进到下一个周期阶段（`bbr_is_next_cycle_phase()`）时，修改后的BBR忽略了数据包丢失作为一个因素。原始算法将丢包视为网络无法处理当前发送速率的指示。
+Architecture and kernel limitations:
+- DKMS-based algorithms require a running kernel version in the configured range, defaulting to **5.10 through 7.1.x**.
+- DKMS-based algorithms require matching kernel headers for the currently running kernel.
 
-### 结论：
+---
 
-理论上修改后的BBR算法通过忽略关键的拥塞信号（如数据包丢失和RTT增加）优先考虑吞吐量，而非网络友好性。在某些条件下可能实现更高的数据传输速率，但是会增加延迟、以及更高的数据包丢失率。
-# ！！ 注意：在实际网络环境中，因为QoS等各种因素，反而很有可能比原版BBR的表现更差。
-### BBRx
+## Requirements
 
-### **1. 更加积极的带宽探测**
+Minimum practical requirements:
 
--   **增加的 `bbr_high_gain` 和调整后的 Pacing 增益**：用于 `BBR_STARTUP` 阶段的 `bbr_high_gain` 值显著增加，并且 `BBR_PROBE_BW` 阶段的 pacing 增益被调整得更加积极。这意味着 bbrx 更快速地提升其发送速率以探测可用带宽。
-- **调整后的 `bbr_full_bw_thresh` 和 `bbr_full_bw_cnt`**：将认为带宽管道“满”的带宽增加阈值从 25% 降低到 5%，并将无需显著带宽增长即可退出启动阶段的轮次数从 3 增加到 10。
--   **将 `bbr_pacing_margin_percent` 从 1% 增加到 5%**：pacing 速率设置为估计带宽以上 5%，而非以下1%。
-
-### **2. 更大的拥塞窗口**
-
--   **翻倍的 `bbr_cwnd_gain` 和增加的 `bbr_cwnd_min_target`**：用于计算拥塞窗口的增益翻倍，且最小拥塞窗口从 4 个数据包增加到 200 个数据包。
-
-### **3. 对 RTT 变化响应减弱**
-
--   **将 `bbr_min_rtt_win_sec` 从 10 秒增加到 10 分钟**：最小 RTT 估计的更新频率降低。
-
-### **4. 调整后的 ACK 聚合处理**
-
--   **增加的 `bbr_extra_acked_gain` 和窗口大小**：应用于额外 ACK 已确认数据的增益增加，并且测量该数据的窗口扩大。
-
-### **总体性能影响**
-
-修改后的 BBR 算法采用了更积极的带宽利用策略，适用于需要最大吞吐量且网络能够处理增加负载而不显著拥塞的环境。然而，在对延迟和拥塞敏感的网络中，这些修改可能导致性能下降。务必在预期的部署场景中彻底测试 BBRx，以确保其优势超过潜在的缺点，并根据需要调整参数，以在吞吐量、网络稳定性和公平性之间取得平衡。
+- Root privileges.
+- Debian or Ubuntu host matching the supported version list.
+- `bash`, `apt-get`, `dpkg`, `uname`, `awk`, `sed`, `grep`, and `sha256sum`.
+- Internet access to the configured `RAW_BASE` source.
+- For DKMS algorithms: `dkms`, `build-essential`, `kmod`, and matching `linux-headers-$(uname -r)`. The script will attempt to install missing build dependencies.
 
 
+Recommended before running:
 
-## 常见问题
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+```
 
-### 脚本运行失败
+---
 
-- **权限问题**：请确保以 root 用户或使用 `sudo` 运行脚本。
-- **不支持的操作系统或内核版本**：请检查你的系统是否符合支持列表。
-- **网络问题**：确保你的服务器可以访问 GitHub 和其他必要的下载源。
+## Quick start
 
-### 模块未加载
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBRInstall.sh)
+```
 
-- **检查内核版本**：确保内核版本符合脚本支持的版本。
-- **手动加载模块**：
+```text
+Options:
+  --algo ALGO           Install one of: bbrv3 bbrx bbrw bbr_brutal bbrw_brutal
+  --raw-base URL        Override source base URL. Can also use RAW_BASE=...
+  --upgrade-system      Run apt-get upgrade after apt-get update. Default: off
+  --force-runtime       Continue in unsupported runtimes such as containers/WSL
+  --no-clear            Do not clear the terminal
+  -h, --help            Show this help
+```
 
-  ```bash
-  sudo modprobe tcp_你的算法名称
-  ```
+Supported algorithm values:
 
-- **查看日志**：检查 `/var/log/syslog` 或使用 `dmesg` 查看详细错误信息。
+| Algorithm | Install method | Congestion-control name configured | Reboot required? |
+|---|---|---|---|
+| `bbrv3` | Prebuilt kernel `.deb` packages | `bbr` | Yes, to boot into the new kernel. |
+| `bbrx` | DKMS kernel module | `bbrx` | Usually no; module is loaded immediately. |
+| `bbrw` | DKMS kernel module | `bbrw` | Usually no; module is loaded immediately. |
+| `bbr_brutal` | DKMS kernel module | `bbr_brutal` | Usually no; module is loaded immediately. |
+| `bbrw_brutal` | DKMS kernel module | `bbrw_brutal` | Usually no; module is loaded immediately. |
+
+---
+
+## Options
+
+### `--algo ALGO`
+
+Selects the congestion-control algorithm non-interactively.
+
+Example:
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBRInstall.sh) --algo bbrx
+```
+
+### `--raw-base URL`
+
+Overrides the source URL used to download kernel packages, DKMS source files, `Makefile`, `dkms.conf`, and checksum files.
+
+For stronger supply-chain control, prefer a trusted fork or a commit-pinned raw URL rather than a moving branch:
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBRInstall.sh) \
+  --algo bbrv3 \
+  --raw-base 'https://raw.githubusercontent.com/<owner>/<repo>/<commit>/BBR-Install/BBR'
+```
+
+### `--force-runtime`
+
+Bypasses container/WSL runtime blocking.
+
+Use only for controlled testing. Installing kernel packages or DKMS modules inside containers generally does not affect the host kernel and can produce misleading results.
+
+---
+
+## Environment variables
+
+Most CLI options can also be controlled with environment variables.
+
+| Variable | Purpose |
+|---|---|
+| `BBR_ALGO` | Same as `--algo`. |
+| `RAW_BASE` | Same as `--raw-base`. |
+| `BBR_SYSCTL_DROPIN` | Override the managed sysctl drop-in path. Default: `/etc/sysctl.d/90-bbr-congestion-control.conf`. |
+| `BBR_SYSCTL_LEGACY_FILE` | Override the legacy sysctl file scanned for conflicting settings. Default: `/etc/sysctl.conf`. |
+| `BBR_MODULES_LOAD_DROPIN` | Override the managed module autoload file. Default: `/etc/modules-load.d/90-bbr-congestion-control.conf`. |
+| `BBR_FORCE_UNSUPPORTED_RUNTIME=1` | Same as `--force-runtime`. |
+| `BBR_WORK_DIR` | Use a specific work directory instead of an auto-created temporary directory. |
+| `BBR_CLEAN_WORK_DIR=0` | Preserve the work directory after exit for debugging. |
+| `BBR_KERNEL_MIN_VERSION` | Advanced/test override for the minimum DKMS kernel version. |
+| `BBR_KERNEL_MAX_VERSION` | Advanced/test override for the maximum DKMS kernel version. |
+
+When using environment variables with `sudo`, remember that many sudo configurations do not preserve environment variables by default. Use one of these patterns:
+
+```bash
+sudo BBR_ALGO=bbrw ./.sh
+```
+
+or:
+
+```bash
+sudo -E ./.sh
+```
+
+Use `sudo -E` only when you intentionally trust the inherited environment.
+
+---
+
+## Verification
+
+Check the active congestion-control algorithm:
+
+```bash
+sysctl net.ipv4.tcp_congestion_control
+```
+
+Check the algorithms available to the current kernel:
+
+```bash
+sysctl net.ipv4.tcp_available_congestion_control
+```
+
+For `bbrv3`, reboot first, then check the running kernel and congestion-control setting:
+
+```bash
+uname -r
+sysctl net.ipv4.tcp_congestion_control
+```
+
+For DKMS algorithms, check DKMS and module state:
+
+```bash
+dkms status | grep -E 'bbrx|bbrw|bbr_brutal|bbrw_brutal'
+lsmod | grep '^tcp_'
+sysctl net.ipv4.tcp_congestion_control
+```
+
+Check the managed configuration files:
+
+```bash
+cat /etc/sysctl.d/90-bbr-congestion-control.conf
+cat /etc/modules-load.d/90-bbr-congestion-control.conf 2>/dev/null || true
+```
+
+---
+
+## Rollback and uninstall
+
+Rollback depends on which installation method was used.
+
+### Reset congestion control to the distro default
+
+Most Debian/Ubuntu systems support `cubic`. Confirm availability first:
+
+```bash
+sysctl net.ipv4.tcp_available_congestion_control
+```
+
+Then switch the current session:
+
+```bash
+sudo sysctl -w net.ipv4.tcp_congestion_control=cubic
+```
+
+Remove or edit the managed drop-in:
+
+```bash
+sudo rm -f /etc/sysctl.d/90-bbr-congestion-control.conf
+```
+
+Optionally create your own replacement drop-in:
+
+```bash
+printf 'net.ipv4.tcp_congestion_control = cubic\n' | \
+  sudo tee /etc/sysctl.d/90-tcp-congestion-control.conf
+```
+
+### Remove a DKMS-based algorithm
+
+Replace `<algo>` and `<version>` with the values shown by `dkms status`:
+
+```bash
+dkms status | grep -E 'bbrx|bbrw|bbr_brutal|bbrw_brutal'
+
+sudo dkms remove -m <algo> -v <version> --all
+sudo rm -f /etc/modules-load.d/90-bbr-congestion-control.conf
+sudo rm -f /etc/sysctl.d/90-bbr-congestion-control.conf
+sudo depmod -a
+```
+
+Unload the module after switching away from it:
+
+```bash
+sudo sysctl -w net.ipv4.tcp_congestion_control=cubic
+sudo modprobe -r tcp_<algo>
+```
+
+Example for `bbrw`:
+
+```bash
+sudo sysctl -w net.ipv4.tcp_congestion_control=cubic
+sudo modprobe -r tcp_bbrw
+```
+
+### Remove a bbrv3 kernel package
+
+Do **not** purge the kernel currently in use. Boot into a known-good distro kernel first.
+
+List installed candidate packages:
+
+```bash
+dpkg -l 'linux-image*' 'linux-headers*' | grep -i bbr || true
+uname -r
+```
+
+After booting into a different kernel, purge the bbrv3 image and headers package names shown by `dpkg -l`:
+
+```bash
+sudo apt-get purge 'linux-image-<bbrv3-kernel-package>' 'linux-headers-<bbrv3-kernel-package>'
+sudo update-grub
+sudo rm -f /etc/sysctl.d/90-bbr-congestion-control.conf
+sudo reboot
+```
+
+Package names vary based on the upstream package set, so inspect `dpkg -l` before purging.
+
+---
+
+## Troubleshooting
+
+### `error: non-interactive mode requires --algo or BBR_ALGO`
+
+The script was run without a TTY. Specify the algorithm explicitly:
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBRInstall.sh) --algo bbrw
+```
+
+### `linux-headers-$(uname -r)` cannot be installed
+
+The running kernel may not have matching headers available from your APT repositories. Install the exact matching headers package, or boot into a kernel that has matching headers available.
+
+Useful checks:
+
+```bash
+uname -r
+ls -ld /lib/modules/$(uname -r)/build
+apt-cache policy linux-headers-$(uname -r)
+```
+
+### DKMS build fails
+
+Review the DKMS build log:
+
+```bash
+sudo find /var/lib/dkms -name make.log -print
+sudo less /var/lib/dkms/<algo>/<version>/build/make.log
+```
+
+Common causes include missing headers, an unsupported kernel version, compiler mismatch, or upstream source incompatibility with the running kernel.
+
+### `modprobe` fails
+
+Check kernel logs:
+
+```bash
+dmesg | tail -n 100
+journalctl -k -n 100 --no-pager
+```
+
+If Secure Boot is enabled, confirm whether unsigned module loading is blocked.
+
+### `sysctl` cannot switch to the selected algorithm
+
+The congestion-control module may not be loaded, or the running kernel may not provide that algorithm.
+
+Check availability:
+
+```bash
+sysctl net.ipv4.tcp_available_congestion_control
+lsmod | grep '^tcp_'
+```
+
+For DKMS algorithms, try loading the module manually:
+
+```bash
+sudo modprobe tcp_bbrw
+```
+
+Replace `tcp_bbrw` with the module name for the selected algorithm.
+
+### bbrv3 installed but not active after reboot
+
+Confirm that the machine booted into the new kernel:
+
+```bash
+uname -r
+```
+
+Then inspect bootloader entries and regenerate GRUB if needed:
+
+```bash
+sudo update-grub
+```
+
+Cloud providers and VPS panels sometimes pin or override boot kernels. Check provider-specific boot settings if the new kernel does not appear.
+
