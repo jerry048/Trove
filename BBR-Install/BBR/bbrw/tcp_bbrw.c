@@ -1,52 +1,26 @@
-/* Bottleneck Bandwidth and RTT (BBR) congestion control
+/* TCP BBRW congestion control
  *
- * BBR congestion control computes the sending rate based on the delivery
- * rate (throughput) estimated from ACKs. In a nutshell:
+ * BBRW is an out-of-tree DKMS TCP congestion-control module derived from
+ * Linux TCP BBR. It keeps BBR-style STARTUP, DRAIN, and the standard
+ * eight-phase PROBE_BW cycle, but intentionally omits PROBE_RTT.
  *
- *   On each ACK, update our model of the network path:
- *      bottleneck_bandwidth = windowed_max(delivered / elapsed, 10 round trips)
- *      rtt_p95 = approximate_windowed_percentile(rtt, 95, 10 seconds)
- *   pacing_rate = pacing_gain * bottleneck_bandwidth
- *   cwnd = max(cwnd_gain * bottleneck_bandwidth * rtt_p95, 4)
+ *   bottleneck_bandwidth = windowed_max(delivered / elapsed, 10 rounds)
+ *   rtt_p95              = approximate_windowed_percentile(rtt, 95, 10 seconds)
+ *   pacing_rate          = pacing_gain * bottleneck_bandwidth, minus 1%
+ *   cwnd                 = cwnd_gain * bottleneck_bandwidth * rtt_p95,
+ *                          floored at 4 packets
  *
- * The core algorithm does not react directly to packet losses or delays,
- * although BBR may adjust the size of next send per ACK when loss is
- * observed, or adjust the sending rate if it estimates there is a
- * traffic policer, in order to keep the drop rate reasonable.
+ * The steady-state PROBE_BW cycle is the standard eight-phase BBR cycle:
  *
- * Here is a state transition diagram for this BBRW variant:
+ *   PROBE_UP: pacing_gain = 1.25
+ *   DRAIN:    pacing_gain = 0.75
+ *   CRUISE:   pacing_gain = 1.00 for the remaining six phases
  *
- *             |
- *             V
- *          STARTUP
- *             |
- *             V
- *           DRAIN
- *             |
- *             V
- *      +--> PROBE_BW --+
- *      |               |
- *      +---------------+
+ * When the RTT percentile window expires, this variant seeds a new window
+ * from a non-delayed RTT sample; if no usable sample is available, it renews
+ * the timestamp without cutting cwnd or changing modes.
  *
- * A BBR flow starts in STARTUP, and ramps up its sending rate quickly.
- * When it estimates the pipe is full, it enters DRAIN to drain the queue.
- * In steady state a BBRW flow remains in PROBE_BW, fully probing and
- * utilizing the pipe's bandwidth in a fair manner, with a small, bounded
- * queue. This variant intentionally omits BBR's PROBE_RTT mode; when the
- * RTT percentile window expires, the window is renewed from ACK samples
- * without temporarily cutting cwnd or changing modes.
- *
- * BBR is described in detail in:
- *   "BBR: Congestion-Based Congestion Control",
- *   Neal Cardwell, Yuchung Cheng, C. Stephen Gunn, Soheil Hassas Yeganeh,
- *   Van Jacobson. ACM Queue, Vol. 14 No. 5, September-October 2016.
- *
- * There is a public e-mail list for discussing BBR development and testing:
- *   https://groups.google.com/forum/#!forum/bbr-dev
- *
- * NOTE: BBR might be used with the fq qdisc ("man tc-fq") with pacing enabled,
- * otherwise TCP stack falls back to an internal pacing using one high
- * resolution timer per TCP socket and may use more resources.
+ * This remains experimental and is intended for controlled testing.
  */
 #include <linux/module.h>
 #include <linux/version.h>
@@ -61,9 +35,17 @@
 #endif
 
 /*
- * Out-of-tree/DKMS compatibility glue for Linux 5.10 through current kernels.
- * This module deliberately does not register BTF kfunc IDs; normal TCP
- * congestion-control registration only requires tcp_register_congestion_control().
+ * DKMS/out-of-tree compatibility notes:
+ * - Linux < 6.1 did not have tcp_snd_cwnd()/tcp_snd_cwnd_set() in this
+ *   compatibility path, so use direct snd_cwnd access there.
+ * - Linux < 6.2 used prandom_u32_max() where newer kernels use
+ *   get_random_u32_below().
+ * - Some older kernels use GSO_MAX_SIZE instead of GSO_LEGACY_MAX_SIZE.
+ * - Linux >= 6.10 changed tcp_congestion_ops.cong_control() signature.
+ * - Linux >= 7.1 split CA_EVENT_TX_START into cwnd_event_tx_start().
+ * - BBRv3/L4S kernels can carry TCP congestion-control API changes without
+ *   matching upstream LINUX_VERSION_CODE, so the Makefile probes the target
+ *   include/net/tcp.h and passes BBRW_TCP_CA_* feature macros.
  */
 static inline u32 bbrw_random_u32_below(u32 ceil)
 {
@@ -105,7 +87,7 @@ static inline void bbrw_snd_cwnd_set(struct tcp_sock *tp, u32 val)
 #define BBR_SCALE 8	/* scaling factor for fractions in BBR (e.g. gains) */
 #define BBR_UNIT (1 << BBR_SCALE)
 
-/* BBRW has the following modes for deciding how fast to send: */
+/* BBRW uses these top-level modes. */
 enum bbr_mode {
 	BBR_STARTUP,	/* ramp up sending rate rapidly to fill pipe */
 	BBR_DRAIN,	/* drain any queue created during startup */
@@ -155,9 +137,11 @@ struct bbr {
 
 #define CYCLE_LEN	8	/* number of phases in a pacing gain cycle */
 
-/* Window length of bw filter (in rounds): */
+/* Window length of the bottleneck-bandwidth max filter, in packet-timed
+ * rounds. This is CYCLE_LEN + 2 = 10 rounds in this variant.
+ */
 static const int bbr_bw_rtts = CYCLE_LEN + 2;
-/* Window length of RTT-percentile filter (in sec): */
+/* Window length of the RTT-percentile filter, in seconds. */
 static const u32 bbr_min_rtt_win_sec = 10;
 /* Percentile to use for the RTT model. 95 means p95 RTT, not min RTT. */
 static const u32 bbr_rtt_percentile = 95;
@@ -166,11 +150,8 @@ static const u32 bbr_rtt_p95_init_step_shift = 4;
 /* Skip TSO below the following bandwidth (bits/sec): */
 static const int bbr_min_tso_rate = 1200000;
 
-/* Pace at ~1% below estimated bw, on average, to reduce queue at bottleneck.
- * In order to help drive the network toward lower queues and low latency while
- * maintaining high utilization, the average pacing rate aims to be slightly
- * lower than the estimated bandwidth. This is an important aspect of the
- * design.
+/* BBRW applies a 1% negative pacing margin on top of the selected pacing
+ * gain to slightly reduce steady-state queueing.
  */
 static const int bbr_pacing_margin_percent = 1;
 
@@ -186,7 +167,7 @@ static const int bbr_high_gain  = BBR_UNIT * 2885 / 1000 + 1;
 static const int bbr_drain_gain = BBR_UNIT * 1000 / 2885;
 /* The gain for deriving steady-state cwnd tolerates delayed/stretched ACKs: */
 static const int bbr_cwnd_gain  = BBR_UNIT * 2;
-/* The pacing_gain values for the PROBE_BW gain cycle, to discover/share bw: */
+/* Standard BBR PROBE_BW gain cycle: PROBE_UP, DRAIN, then six CRUISE phases. */
 static const int bbr_pacing_gain[] = {
 	BBR_UNIT * 5 / 4,	/* probe for more available bw */
 	BBR_UNIT * 3 / 4,	/* drain queue and/or yield bw to other flows */
@@ -196,16 +177,16 @@ static const int bbr_pacing_gain[] = {
 /* Randomize the starting gain cycling phase over N phases: */
 static const u32 bbr_cycle_rand = 7;
 
-/* Try to keep at least this many packets in flight, if things go smoothly. For
- * smooth functioning, a sliding window protocol ACKing every other packet
- * needs at least 4 packets in flight:
+/* Keep at least four packets in flight when possible. This supports
+ * ACK-every-other-packet delayed ACK behavior and is also the PROBE_RTT cwnd
+ * cap in variants that implement PROBE_RTT.
  */
 static const u32 bbr_cwnd_min_target = 4;
 
 /* To estimate if BBR_STARTUP mode (i.e. high_gain) has filled pipe... */
-/* If bw has increased significantly (1.25x), there may be more bw available: */
+/* If bw has increased by at least 25%, there may be more bw available. */
 static const u32 bbr_full_bw_thresh = BBR_UNIT * 5 / 4;
-/* But after 3 rounds w/o significant bw growth, estimate pipe is full: */
+/* After 3 rounds without that growth, estimate the pipe is full. */
 static const u32 bbr_full_bw_cnt = 3;
 
 /* "long-term" ("LT") bandwidth estimator parameters... */
@@ -213,9 +194,9 @@ static const u32 bbr_full_bw_cnt = 3;
 static const u32 bbr_lt_intvl_min_rtts = 4;
 /* If lost/delivered ratio > 20%, interval is "lossy" and we may be policed: */
 static const u32 bbr_lt_loss_thresh = 50;
-/* If 2 intervals have a bw ratio <= 1/8, their bw is "consistent": */
+/* If 2 intervals have a bw ratio <= 1/8, their bw is "consistent". */
 static const u32 bbr_lt_bw_ratio = BBR_UNIT / 8;
-/* If 2 intervals have a bw diff <= 4 Kbit/sec their bw is "consistent": */
+/* If 2 intervals have a bw diff <= 4 Kbit/sec, their bw is "consistent". */
 static const u32 bbr_lt_bw_diff = 4000 / 8;
 /* If we estimate we're policed, use lt_bw for this many round trips: */
 static const u32 bbr_lt_bw_max_rtts = 48;
@@ -224,9 +205,9 @@ static const u32 bbr_lt_bw_max_rtts = 48;
 static const int bbr_extra_acked_gain = BBR_UNIT;
 /* Window length of extra_acked window. */
 static const u32 bbr_extra_acked_win_rtts = 5;
-/* Max allowed val for ack_epoch_acked, after which sampling epoch is reset */
+/* Max allowed val for ack_epoch_acked, after which sampling epoch is reset. */
 static const u32 bbr_ack_epoch_acked_reset_thresh = 1U << 20;
-/* Time period for clamping cwnd increment due to ack aggregation */
+/* Time period for clamping cwnd increment due to ACK aggregation. */
 static const u32 bbr_extra_acked_max_us = 100 * 1000;
 
 /* Do we estimate that STARTUP filled the pipe? */
@@ -436,15 +417,13 @@ static u32 bbr_bdp(struct sock *sk, u32 bw, int gain)
 	return bdp;
 }
 
-/* To achieve full performance in high-speed paths, we budget enough cwnd to
+/* To achieve full performance in high-speed paths, budget enough cwnd to
  * fit full-sized skbs in-flight on both end hosts to fully utilize the path:
  *   - one skb in sending host Qdisc,
  *   - one skb in sending host TSO/GSO engine
  *   - one skb being received by receiver host LRO/GRO/delayed-ACK engine
- * Don't worry, at low rates (bbr_min_tso_rate) this won't bloat cwnd because
- * in such cases tso_segs_goal is 1. The minimum cwnd is 4 packets,
- * which allows 2 outstanding 2-packet sequences, to try to keep pipe
- * full even with ACK-every-other-packet delayed ACKs.
+ * At low rates this TSO/GSO budget remains small because tso_segs_goal is 1.
+ * The configured cwnd floor is applied later by bbr_set_cwnd().
  */
 static u32 bbr_quantization_budget(struct sock *sk, u32 cwnd)
 {
@@ -463,7 +442,7 @@ static u32 bbr_quantization_budget(struct sock *sk, u32 cwnd)
 	return cwnd;
 }
 
-/* Find inflight based on min RTT and the estimated bottleneck bandwidth. */
+/* Find inflight based on RTT p95 and the estimated bottleneck bandwidth. */
 static u32 bbr_inflight(struct sock *sk, u32 bw, int gain)
 {
 	u32 inflight;
@@ -507,7 +486,7 @@ static u32 bbr_packets_in_net_at_edt(struct sock *sk, u32 inflight_now)
 	return inflight_at_edt - interval_delivered;
 }
 
-/* Find the cwnd increment based on estimate of ack aggregation */
+/* Find the cwnd increment based on estimated ACK aggregation. */
 static u32 bbr_ack_aggregation_cwnd(struct sock *sk)
 {
 	u32 max_aggr_cwnd, aggr_cwnd = 0;
@@ -550,7 +529,7 @@ static bool bbr_set_cwnd_to_recover_or_restore(
 		/* Starting 1st round of Recovery, so do packet conservation. */
 		bbr->packet_conservation = 1;
 		bbr->next_rtt_delivered = tp->delivered;  /* start round now */
-		/* Cut unused cwnd from app behavior, TSQ, or TSO deferral: */
+		/* Preserve existing cwnd while enabling packet conservation. */
 		cwnd = max(cwnd, tcp_packets_in_flight(tp) + acked);
 	} else if (prev_state >= TCP_CA_Recovery && state < TCP_CA_Recovery) {
 		/* Exiting loss recovery; restore cwnd saved before recovery. */
@@ -601,7 +580,7 @@ done:
 	bbrw_snd_cwnd_set(tp, min(cwnd, tp->snd_cwnd_clamp));	/* apply global cap */
 }
 
-/* End cycle phase if it's time and/or we hit the phase's in-flight target. */
+/* End cycle phase if it is time and/or we hit the phase's target. */
 static bool bbr_is_next_cycle_phase(struct sock *sk,
 				    const struct rate_sample *rs)
 {
@@ -622,9 +601,9 @@ static bool bbr_is_next_cycle_phase(struct sock *sk,
 	bw = bbr_max_bw(sk);
 
 	/* A pacing_gain > 1.0 probes for bw by trying to raise inflight to at
-	 * least pacing_gain*BDP; this may take more than min_rtt if min_rtt is
-	 * small (e.g. on a LAN). We do not persist if packets are lost, since
-	 * a path with small buffers may not hold that much.
+	 * least pacing_gain*BDP; this may take more than one RTT-p95 interval if
+	 * the interval is small (e.g. on a LAN). We do not persist if packets are
+	 * lost, since a path with small buffers may not hold that much.
 	 */
 	if (bbr->pacing_gain > BBR_UNIT)
 		return is_full_length &&
@@ -800,7 +779,7 @@ static void bbr_lt_bw_sampling(struct sock *sk, const struct rate_sample *rs)
 	bbr_lt_bw_interval_done(sk, bw);
 }
 
-/* Estimate the bandwidth based on how fast packets are delivered */
+/* Estimate the bandwidth based on how fast packets are delivered. */
 static void bbr_update_bw(struct sock *sk, const struct rate_sample *rs)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -844,18 +823,17 @@ static void bbr_update_bw(struct sock *sk, const struct rate_sample *rs)
 	}
 }
 
-/* Estimates the windowed max degree of ack aggregation.
- * This is used to provision extra in-flight data to keep sending during
- * inter-ACK silences.
+/* Estimate the windowed max degree of ACK aggregation.
+ * This provisions extra in-flight data to keep sending during inter-ACK
+ * silences. ACK aggregation is estimated as excess data ACKed beyond the
+ * expected amount from max_bw over the sampling interval:
  *
- * Degree of ack aggregation is estimated as extra data acked beyond expected.
+ *   max_extra_acked = max_recent(acked - max_bw * interval)
+ *   cwnd += max_extra_acked
  *
- * max_extra_acked = "maximum recent excess data ACKed beyond max_bw * interval"
- * cwnd += max_extra_acked
- *
- * Max extra_acked is clamped by cwnd and bw * bbr_extra_acked_max_us (100 ms).
- * Max filter is an approximate sliding window of 5-10 (packet timed) round
- * trips.
+ * Max extra_acked is clamped by cwnd and bw * bbr_extra_acked_max_us. With
+ * this variant's constants, that clamp is 100 ms and the max filter is an
+ * approximate sliding window of 5-10 packet-timed round trips.
  */
 static void bbr_update_ack_aggregation(struct sock *sk,
 				       const struct rate_sample *rs)
@@ -905,13 +883,9 @@ static void bbr_update_ack_aggregation(struct sock *sk,
 		bbr->extra_acked[bbr->extra_acked_win_idx] = extra_acked;
 }
 
-/* Estimate when the pipe is full, using the change in delivery rate: BBR
- * estimates that STARTUP filled the pipe if the estimated bw hasn't changed by
- * at least bbr_full_bw_thresh (25%) after bbr_full_bw_cnt (3) non-app-limited
- * rounds. Why 3 rounds: 1: rwin autotuning grows the rwin, 2: we fill the
- * higher rwin, 3: we get higher delivery rate samples. Or transient
- * cross-traffic or radio noise can go away. CUBIC Hystart shares a similar
- * design goal, but uses delay and inter-ACK spacing instead of bandwidth.
+/* Estimate when STARTUP has filled the pipe using delivery-rate growth.
+ * If the max bandwidth has not increased by bbr_full_bw_thresh for
+ * bbr_full_bw_cnt non-app-limited rounds, mark the pipe full.
  */
 static void bbr_check_full_bw_reached(struct sock *sk,
 				      const struct rate_sample *rs)
@@ -960,7 +934,7 @@ static void bbr_reset_rtt_p95(struct bbr *bbr, u32 rtt_us)
 	bbr->rtt_p95_step_us = init_step;
 }
 
-/* Compact Frugal-2U-style streaming estimator for the RTT p95.
+/* Compact Frugal-2U-style streaming estimator for RTT p95.
  *
  * This intentionally uses very little per-flow state so struct bbr still fits
  * in icsk_ca_priv. It is approximate; an exact p95 over 10 seconds would need
@@ -1014,14 +988,10 @@ static void bbr_update_rtt_p95_sample(struct bbr *bbr, u32 rtt_us)
 	}
 }
 
-/* The customized variant uses the RTT 95th percentile as the delay component
- * of BDP instead of original BBR's min RTT.
- *
- * The p95 estimator is reset every bbr_min_rtt_win_sec seconds. Samples marked
- * as delayed ACKs are not allowed to seed a new window, because that can start
- * the estimator from an artificially inflated RTT. If the window expires
- * without a usable RTT sample, this variant renews the timestamp directly
- * instead of entering PROBE_RTT.
+/* This variant uses RTT p95 as the delay component of BDP instead of BBR's
+ * min RTT. When the percentile window expires, seed a new window from a
+ * non-delayed RTT sample. If no usable sample is available, renew the
+ * timestamp without entering PROBE_RTT.
  */
 static void bbr_update_min_rtt(struct sock *sk, const struct rate_sample *rs)
 {
@@ -1042,7 +1012,7 @@ static void bbr_update_min_rtt(struct sock *sk, const struct rate_sample *rs)
 		}
 	}
 
-	/* Restart after idle ends only once we process a new S/ACK for data */
+	/* Restart after idle ends only once we process a new S/ACK for data. */
 	if (rs->delivered > 0)
 		bbr->idle_restart = 0;
 }
@@ -1098,7 +1068,7 @@ static void bbr_main_impl(struct sock *sk, const struct rate_sample *rs)
 /*
  * Do not key this only off LINUX_VERSION_CODE. Some BBRv3/L4S trees carry
  * a 6.x version number while keeping the older two-argument cong_control hook.
- * The Makefile probes include/net/tcp.h and defines one of these macros.
+ * The Makefile probes include/net/tcp.h and passes BBRW_TCP_CA_* feature macros.
  */
 #if defined(BBRW_TCP_CA_CONG_CONTROL_4_ARGS) || \
 	(!defined(BBRW_TCP_CA_CONG_CONTROL_2_ARGS) && \

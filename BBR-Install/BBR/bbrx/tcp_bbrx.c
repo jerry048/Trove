@@ -1,60 +1,27 @@
-/* Bottleneck Bandwidth and RTT (BBR) congestion control
+/* TCP BBRx congestion control
  *
- * BBR congestion control computes the sending rate based on the delivery
- * rate (throughput) estimated from ACKs. In a nutshell:
+ * BBRx is an out-of-tree DKMS TCP congestion-control module derived from
+ * Linux TCP BBR. It keeps BBR-style STARTUP, DRAIN, PROBE_BW, and PROBE_RTT,
+ * but uses more aggressive experimental parameters than BBRv1.
  *
- *   On each ACK, update our model of the network path:
- *      bottleneck_bandwidth = windowed_max(delivered / elapsed, 10 round trips)
- *      min_rtt = windowed_min(rtt, 600 seconds)
- *   pacing_rate = pacing_gain * bottleneck_bandwidth
- *   cwnd = max(cwnd_gain * bottleneck_bandwidth * min_rtt, 200)
+ *   bottleneck_bandwidth = windowed_max(delivered / elapsed, 10 rounds)
+ *   min_rtt              = windowed_min(rtt, 600 seconds)
+ *   pacing_rate          = pacing_gain * bottleneck_bandwidth, plus 5%
+ *   cwnd                 = cwnd_gain * bottleneck_bandwidth * min_rtt,
+ *                          floored at 200 packets
  *
- * The core algorithm does not react directly to packet losses or delays,
- * although BBR may adjust the size of next send per ACK when loss is
- * observed, or adjust the sending rate if it estimates there is a
- * traffic policer, in order to keep the drop rate reasonable.
+ * The steady-state PROBE_BW cycle is the standard eight-phase BBR cycle:
  *
- * Here is a state transition diagram for BBR:
+ *   PROBE_UP: pacing_gain = 1.25
+ *   DRAIN:    pacing_gain = 0.75
+ *   CRUISE:   pacing_gain = 1.00 for the remaining six phases
  *
- *             |
- *             V
- *    +---> STARTUP  ----+
- *    |        |         |
- *    |        V         |
- *    |      DRAIN   ----+
- *    |        |         |
- *    |        V         |
- *    +---> PROBE_BW ----+
- *    |      ^    |      |
- *    |      |    |      |
- *    |      +----+      |
- *    |                  |
- *    +---- PROBE_RTT <--+
+ * This variant keeps PROBE_RTT. When the min_rtt filter expires on a
+ * continuously busy flow, it temporarily caps cwnd to 200 packets for at
+ * least 100 ms and one packet-timed round, then returns to STARTUP or
+ * PROBE_BW.
  *
- * A BBR flow starts in STARTUP, and ramps up its sending rate quickly.
- * When it estimates the pipe is full, it enters DRAIN to drain the queue.
- * In steady state a BBR flow only uses PROBE_BW and PROBE_RTT.
- * A long-lived BBR flow spends the vast majority of its time remaining
- * (repeatedly) in PROBE_BW, fully probing and utilizing the pipe's bandwidth
- * in a fair manner, with a small, bounded queue. *If* a flow has been
- * continuously sending for the entire min_rtt window, and hasn't seen an RTT
- * sample that matches or decreases its min_rtt estimate for 10 seconds, then
- * it briefly enters PROBE_RTT to cut inflight to a minimum value to re-probe
- * the path's two-way propagation delay (min_rtt). When exiting PROBE_RTT, if
- * we estimated that we reached the full bw of the pipe then we enter PROBE_BW;
- * otherwise we enter STARTUP to try to fill the pipe.
- *
- * BBR is described in detail in:
- *   "BBR: Congestion-Based Congestion Control",
- *   Neal Cardwell, Yuchung Cheng, C. Stephen Gunn, Soheil Hassas Yeganeh,
- *   Van Jacobson. ACM Queue, Vol. 14 No. 5, September-October 2016.
- *
- * There is a public e-mail list for discussing BBR development and testing:
- *   https://groups.google.com/forum/#!forum/bbr-dev
- *
- * NOTE: BBR might be used with the fq qdisc ("man tc-fq") with pacing enabled,
- * otherwise TCP stack falls back to an internal pacing using one high
- * resolution timer per TCP socket and may use more resources.
+ * This remains experimental and is intended for controlled testing.
  */
 #include <linux/module.h>
 #include <linux/version.h>
@@ -119,7 +86,7 @@ static inline u32 bbrx_random_u32_below(u32 ceil)
 #define BBR_SCALE 8	/* scaling factor for fractions in BBR (e.g. gains) */
 #define BBR_UNIT (1 << BBR_SCALE)
 
-/* BBR has the following modes for deciding how fast to send: */
+/* BBRx uses these top-level modes. */
 enum bbr_mode {
 	BBR_STARTUP,	/* ramp up sending rate rapidly to fill pipe */
 	BBR_DRAIN,	/* drain any queue created during startup */
@@ -141,7 +108,7 @@ struct bbr {
 		packet_conservation:1,  /* use packet conservation? */
 		round_start:1,	     /* start of packet-timed tx->ack round? */
 		idle_restart:1,	     /* restarting after idle? */
-		probe_rtt_round_done:1,  /* a BBR_PROBE_RTT round at 4 pkts? */
+		probe_rtt_round_done:1,  /* a BBR_PROBE_RTT round at cwnd floor? */
 		unused:13,
 		lt_is_sampling:1,    /* taking long-term ("LT") samples now? */
 		lt_rtt_cnt:7,	     /* round trips in long-term interval */
@@ -171,36 +138,33 @@ struct bbr {
 
 #define CYCLE_LEN	8	/* number of phases in a pacing gain cycle */
 
-/* Window length of bw filter (in rounds): */
+/* Window length of the bottleneck-bandwidth max filter, in packet-timed
+ * rounds. This is CYCLE_LEN + 2 = 10 rounds in this variant.
+ */
 static const int bbr_bw_rtts = CYCLE_LEN + 2;
-/* Window length of min_rtt filter (in sec): */
+/* Window length of the min_rtt filter, in seconds. */
 static const u32 bbr_min_rtt_win_sec = 600;
-/* Minimum time (in ms) spent at bbr_cwnd_min_target in BBR_PROBE_RTT mode: */
+/* Minimum time spent at the cwnd floor in BBR_PROBE_RTT mode, in ms. */
 static const u32 bbr_probe_rtt_mode_ms = 100;
 /* Skip TSO below the following bandwidth (bits/sec): */
 static const int bbr_min_tso_rate = 1200000;
 
-/* Pace at ~1% below estimated bw, on average, to reduce queue at bottleneck.
- * In order to help drive the network toward lower queues and low latency while
- * maintaining high utilization, the average pacing rate aims to be slightly
- * lower than the estimated bandwidth. This is an important aspect of the
- * design.
+/* BBRx applies a 5% positive pacing margin on top of the selected pacing
+ * gain.
  */
 static const int bbr_pacing_margin_percent = 5;
 
-/* We use a high_gain value of 2/ln(2) because it's the smallest pacing gain
- * that will allow a smoothly increasing pacing rate that will double each RTT
- * and send the same number of packets per RTT that an un-paced, slow-starting
- * Reno or CUBIC flow would:
+/* BBRx uses an experimental STARTUP pacing gain of 6.0, making STARTUP
+ * more aggressive than the BBRv1 default high_gain of 2/ln(2).
  */
 static const int bbr_high_gain  = BBR_UNIT * 6000 / 1000 + 1;
-/* The pacing gain of 1/high_gain in BBR_DRAIN is calculated to typically drain
- * the queue created in BBR_STARTUP in a single round:
+/* BBRx keeps the BBRv1 DRAIN pacing gain. This is not the reciprocal of
+ * BBRx's experimental STARTUP gain.
  */
 static const int bbr_drain_gain = BBR_UNIT * 1000 / 2885;
-/* The gain for deriving steady-state cwnd tolerates delayed/stretched ACKs: */
+/* BBRx uses an experimental cwnd gain of 4.0. */
 static const int bbr_cwnd_gain  = BBR_UNIT * 4;
-/* The pacing_gain values for the PROBE_BW gain cycle, to discover/share bw: */
+/* Standard BBR PROBE_BW gain cycle: PROBE_UP, DRAIN, then six CRUISE phases. */
 static const int bbr_pacing_gain[] = {
 	BBR_UNIT * 5 / 4,	/* probe for more available bw */
 	BBR_UNIT * 3 / 4,	/* drain queue and/or yield bw to other flows */
@@ -210,16 +174,15 @@ static const int bbr_pacing_gain[] = {
 /* Randomize the starting gain cycling phase over N phases: */
 static const u32 bbr_cycle_rand = 7;
 
-/* Try to keep at least this many packets in flight, if things go smoothly. For
- * smooth functioning, a sliding window protocol ACKing every other packet
- * needs at least 4 packets in flight:
+/* BBRx uses an experimental cwnd floor of 200 packets. This is also the
+ * cwnd cap while BBRx is in PROBE_RTT.
  */
 static const u32 bbr_cwnd_min_target = 200;
 
 /* To estimate if BBR_STARTUP mode (i.e. high_gain) has filled pipe... */
-/* If bw has increased significantly (1.25x), there may be more bw available: */
+/* If bw has increased by at least 5%, there may be more bw available. */
 static const u32 bbr_full_bw_thresh = BBR_UNIT * 105 / 100;
-/* But after 3 rounds w/o significant bw growth, estimate pipe is full: */
+/* After 10 rounds without that growth, BBRx estimates the pipe is full. */
 static const u32 bbr_full_bw_cnt = 10;
 
 /* "long-term" ("LT") bandwidth estimator parameters... */
@@ -227,20 +190,20 @@ static const u32 bbr_full_bw_cnt = 10;
 static const u32 bbr_lt_intvl_min_rtts = 1;
 /* If lost/delivered ratio > 20%, interval is "lossy" and we may be policed: */
 static const u32 bbr_lt_loss_thresh = 50;
-/* If 2 intervals have a bw ratio <= 1/8, their bw is "consistent": */
+/* If 2 intervals have a bw ratio <= 1/2, their bw is "consistent": */
 static const u32 bbr_lt_bw_ratio = BBR_UNIT / 2;
-/* If 2 intervals have a bw diff <= 4 Kbit/sec their bw is "consistent": */
+/* If 2 intervals have a bw diff <= 4 Mbit/sec, their bw is "consistent": */
 static const u32 bbr_lt_bw_diff = 4000000 / 8;
 /* If we estimate we're policed, use lt_bw for this many round trips: */
 static const u32 bbr_lt_bw_max_rtts = 48;
 
-/* Gain factor for adding extra_acked to target cwnd: */
+/* Gain factor for adding extra_acked to target cwnd; 1.5x in BBRx. */
 static const int bbr_extra_acked_gain = BBR_UNIT * 6 / 4;
 /* Window length of extra_acked window. */
 static const u32 bbr_extra_acked_win_rtts = 15;
-/* Max allowed val for ack_epoch_acked, after which sampling epoch is reset */
+/* Max allowed val for ack_epoch_acked, after which sampling epoch is reset. */
 static const u32 bbr_ack_epoch_acked_reset_thresh = 1U << 20;
-/* Time period for clamping cwnd increment due to ack aggregation */
+/* Time period for clamping cwnd increment due to ACK aggregation. */
 static const u32 bbr_extra_acked_max_us = 25 * 1000;
 
 static void bbr_check_probe_rtt_done(struct sock *sk);
@@ -378,7 +341,7 @@ static u32 bbr_tso_segs(struct sock *sk, unsigned int mss_now)
 #endif
 #endif
 
-/* Save "last known good" cwnd so we can restore it after losses or PROBE_RTT */
+/* Save "last known good" cwnd so we can restore it after losses or PROBE_RTT. */
 static void bbr_save_cwnd(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -458,15 +421,13 @@ static u32 bbr_bdp(struct sock *sk, u32 bw, int gain)
 	return bdp;
 }
 
-/* To achieve full performance in high-speed paths, we budget enough cwnd to
+/* To achieve full performance in high-speed paths, budget enough cwnd to
  * fit full-sized skbs in-flight on both end hosts to fully utilize the path:
  *   - one skb in sending host Qdisc,
  *   - one skb in sending host TSO/GSO engine
  *   - one skb being received by receiver host LRO/GRO/delayed-ACK engine
- * Don't worry, at low rates (bbr_min_tso_rate) this won't bloat cwnd because
- * in such cases tso_segs_goal is 1. The minimum cwnd is 4 packets,
- * which allows 2 outstanding 2-packet sequences, to try to keep pipe
- * full even with ACK-every-other-packet delayed ACKs.
+ * At low rates this TSO/GSO budget remains small because tso_segs_goal is 1.
+ * The configured cwnd floor is applied later by bbr_set_cwnd().
  */
 static u32 bbr_quantization_budget(struct sock *sk, u32 cwnd)
 {
@@ -529,7 +490,7 @@ static u32 bbr_packets_in_net_at_edt(struct sock *sk, u32 inflight_now)
 	return inflight_at_edt - interval_delivered;
 }
 
-/* Find the cwnd increment based on estimate of ack aggregation */
+/* Find the cwnd increment based on estimated ACK aggregation. */
 static u32 bbr_ack_aggregation_cwnd(struct sock *sk)
 {
 	u32 max_aggr_cwnd, aggr_cwnd = 0;
@@ -572,7 +533,7 @@ static bool bbr_set_cwnd_to_recover_or_restore(
 		/* Starting 1st round of Recovery, so do packet conservation. */
 		bbr->packet_conservation = 1;
 		bbr->next_rtt_delivered = tp->delivered;  /* start round now */
-		/* Cut unused cwnd from app behavior, TSQ, or TSO deferral: */
+		/* Cut unused cwnd from app behavior, TSQ, or TSO deferral. */
 		cwnd = tcp_packets_in_flight(tp) + acked;
 	} else if (prev_state >= TCP_CA_Recovery && state < TCP_CA_Recovery) {
 		/* Exiting loss recovery; restore cwnd saved before recovery. */
@@ -626,7 +587,7 @@ done:
 		tcp_snd_cwnd_set(tp, min(tcp_snd_cwnd(tp), bbr_cwnd_min_target));
 }
 
-/* End cycle phase if it's time and/or we hit the phase's in-flight target. */
+/* End cycle phase if it is time and/or we hit the phase's target. */
 static bool bbr_is_next_cycle_phase(struct sock *sk,
 				    const struct rate_sample *rs)
 {
@@ -833,7 +794,7 @@ static void bbr_lt_bw_sampling(struct sock *sk, const struct rate_sample *rs)
 	bbr_lt_bw_interval_done(sk, bw);
 }
 
-/* Estimate the bandwidth based on how fast packets are delivered */
+/* Estimate the bandwidth based on how fast packets are delivered. */
 static void bbr_update_bw(struct sock *sk, const struct rate_sample *rs)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -877,18 +838,17 @@ static void bbr_update_bw(struct sock *sk, const struct rate_sample *rs)
 	}
 }
 
-/* Estimates the windowed max degree of ack aggregation.
- * This is used to provision extra in-flight data to keep sending during
- * inter-ACK silences.
+/* Estimate the windowed max degree of ACK aggregation.
+ * This provisions extra in-flight data to keep sending during inter-ACK
+ * silences. ACK aggregation is estimated as excess data ACKed beyond the
+ * expected amount from max_bw over the sampling interval:
  *
- * Degree of ack aggregation is estimated as extra data acked beyond expected.
+ *   max_extra_acked = max_recent(acked - max_bw * interval)
+ *   cwnd += max_extra_acked
  *
- * max_extra_acked = "maximum recent excess data ACKed beyond max_bw * interval"
- * cwnd += max_extra_acked
- *
- * Max extra_acked is clamped by cwnd and bw * bbr_extra_acked_max_us (100 ms).
- * Max filter is an approximate sliding window of 5-10 (packet timed) round
- * trips.
+ * Max extra_acked is clamped by cwnd and bw * bbr_extra_acked_max_us. With
+ * BBRx's constants, that clamp is 25 ms and the max filter is an approximate
+ * sliding window of 15-30 packet-timed round trips.
  */
 static void bbr_update_ack_aggregation(struct sock *sk,
 				       const struct rate_sample *rs)
@@ -938,13 +898,9 @@ static void bbr_update_ack_aggregation(struct sock *sk,
 		bbr->extra_acked[bbr->extra_acked_win_idx] = extra_acked;
 }
 
-/* Estimate when the pipe is full, using the change in delivery rate: BBR
- * estimates that STARTUP filled the pipe if the estimated bw hasn't changed by
- * at least bbr_full_bw_thresh (25%) after bbr_full_bw_cnt (3) non-app-limited
- * rounds. Why 3 rounds: 1: rwin autotuning grows the rwin, 2: we fill the
- * higher rwin, 3: we get higher delivery rate samples. Or transient
- * cross-traffic or radio noise can go away. CUBIC Hystart shares a similar
- * design goal, but uses delay and inter-ACK spacing instead of bandwidth.
+/* Estimate when STARTUP has filled the pipe using delivery-rate growth.
+ * If the max bandwidth has not increased by bbr_full_bw_thresh for
+ * bbr_full_bw_cnt non-app-limited rounds, mark the pipe full.
  */
 static void bbr_check_full_bw_reached(struct sock *sk,
 				      const struct rate_sample *rs)
@@ -995,24 +951,10 @@ static void bbr_check_probe_rtt_done(struct sock *sk)
 	bbr_reset_mode(sk);
 }
 
-/* The goal of PROBE_RTT mode is to have BBR flows cooperatively and
- * periodically drain the bottleneck queue, to converge to measure the true
- * min_rtt (unloaded propagation delay). This allows the flows to keep queues
- * small (reducing queuing delay and packet loss) and achieve fairness among
- * BBR flows.
- *
- * The min_rtt filter window is 10 seconds. When the min_rtt estimate expires,
- * we enter PROBE_RTT mode and cap the cwnd at bbr_cwnd_min_target=4 packets.
- * After at least bbr_probe_rtt_mode_ms=200ms and at least one packet-timed
- * round trip elapsed with that flight size <= 4, we leave PROBE_RTT mode and
- * re-enter the previous mode. BBR uses 200ms to approximately bound the
- * performance penalty of PROBE_RTT's cwnd capping to roughly 2% (200ms/10s).
- *
- * Note that flows need only pay 2% if they are busy sending over the last 10
- * seconds. Interactive applications (e.g., Web, RPCs, video chunks) often have
- * natural silences or low-rate periods within 10 seconds where the rate is low
- * enough for long enough to drain its queue in the bottleneck. We pick up
- * these min RTT measurements opportunistically with our min_rtt filter. :-)
+/* This variant keeps BBR-style PROBE_RTT. If a continuously busy flow has not
+ * refreshed its min_rtt estimate within bbr_min_rtt_win_sec, temporarily cap
+ * cwnd to bbr_cwnd_min_target for at least bbr_probe_rtt_mode_ms and one
+ * packet-timed round, then resume STARTUP or PROBE_BW.
  */
 static void bbr_update_min_rtt(struct sock *sk, const struct rate_sample *rs)
 {
@@ -1054,7 +996,7 @@ static void bbr_update_min_rtt(struct sock *sk, const struct rate_sample *rs)
 				bbr_check_probe_rtt_done(sk);
 		}
 	}
-	/* Restart after idle ends only once we process a new S/ACK for data */
+	/* Restart after idle ends only once we process a new S/ACK for data. */
 	if (rs->delivered > 0)
 		bbr->idle_restart = 0;
 }
@@ -1115,7 +1057,7 @@ static void bbr_main_common(struct sock *sk, const struct rate_sample *rs)
 /*
  * Do not key this only off LINUX_VERSION_CODE. Some BBRv3/L4S trees carry
  * a 6.x version number while keeping the older two-argument cong_control hook.
- * The Makefile probes include/net/tcp.h and defines BBRX_TCP_CA_* macros.
+ * The Makefile probes include/net/tcp.h and passes BBRX_TCP_CA_* feature macros.
  */
 #if defined(BBRX_TCP_CA_CONG_CONTROL_4_ARGS) || 	(!defined(BBRX_TCP_CA_PROBED) && 	 LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0))
 static void bbr_main(struct sock *sk, u32 ack, int flag,
