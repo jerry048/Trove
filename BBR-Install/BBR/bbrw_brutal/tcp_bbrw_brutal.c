@@ -14,8 +14,6 @@
  *
  *   CRUISE[0..5]: pacing_gain = 1.00 with Brutal loss compensation
  *   PROBE_UP:     pacing_gain = 1.25, no Brutal loss compensation; exit when
- *                 the current loss sample is higher than the approximate P95
- *                 loss observed during the last CRUISE phase, or when
  *                 estimated in-flight reaches 1.25 * BDP
  *   DRAIN:        pacing_gain = 0.75, no Brutal loss compensation, until
  *                 in-flight is <= estimated BDP
@@ -37,7 +35,6 @@
 #include <linux/inet.h>
 #include <linux/random.h>
 #include <linux/win_minmax.h>
-
 
 /*
  * DKMS/out-of-tree compatibility notes:
@@ -105,8 +102,6 @@ struct bbr {
 	u32	min_rtt_us;	        /* approx RTT 95th percentile, us */
 	u32	min_rtt_stamp;	        /* timestamp of RTT percentile window */
 	s32	rtt_p95_step_us;       /* adaptive step for p95 estimator */
-	u16	cruise_loss_bins_lo; /* 2-bit loss-pct histogram bins 0..7 */
-	u16	cruise_loss_bins_hi; /* 2-bit loss-pct histogram bins 8..15 */
 	struct minmax bw;	/* Max recent delivery rate in pkts/uS << 24 */
 	u32	rtt_cnt;	    /* count of packet-timed rounds elapsed */
 	u32     next_rtt_delivered; /* scb->tx.delivered at end of round */
@@ -159,7 +154,6 @@ enum bbrw_brutal_probe_phase {
 
 #define CYCLE_LEN	8	/* CRUISE x6, PROBE_UP, DRAIN */
 #define BBRWB_CRUISE_PHASES	6
-#define BBRWB_LOSS_BINS	16
 
 /* Window length of the bottleneck-bandwidth max filter, in packet-timed
  * rounds. This is 10 rounds in this variant.
@@ -202,9 +196,6 @@ static const int bbr_pacing_gain[] = {
 	[BBRWB_PROBE_UP] = BBR_UNIT * 5 / 4,	/* 1.25, no comp */
 	[BBRWB_DRAIN]    = BBR_UNIT * 3 / 4,	/* 0.75 until <= BDP */
 };
-/* Percentile of last-CRUISE loss used as the PROBE_UP loss exit threshold. */
-static const u32 bbrw_brutal_loss_percentile = 95;
-
 static u32 bbrw_brutal_loss_guard_percent = 20;
 static u32 bbrw_brutal_min_ack_percent = 80;
 module_param_named(loss_guard_percent, bbrw_brutal_loss_guard_percent, uint, 0644);
@@ -246,7 +237,6 @@ static const u32 bbr_extra_acked_win_rtts = 5;
 static const u32 bbr_ack_epoch_acked_reset_thresh = 1U << 20;
 /* Time period for clamping cwnd increment due to ACK aggregation. */
 static const u32 bbr_extra_acked_max_us = 100 * 1000;
-
 
 /* Do we estimate that STARTUP filled the pipe? */
 static bool bbr_full_bw_reached(const struct sock *sk)
@@ -571,7 +561,6 @@ static u32 bbr_ack_aggregation_cwnd(struct sock *sk)
 	return aggr_cwnd;
 }
 
-
 static bool bbrw_brutal_is_cruise_phase_idx(u32 cycle_idx)
 {
 	return cycle_idx < BBRWB_CRUISE_PHASES;
@@ -580,72 +569,6 @@ static bool bbrw_brutal_is_cruise_phase_idx(u32 cycle_idx)
 static bool bbrw_brutal_is_cruise_phase(const struct bbr *bbr)
 {
 	return bbrw_brutal_is_cruise_phase_idx(bbr->cycle_idx);
-}
-
-static bool bbrw_brutal_is_loss_reference_phase(const struct bbr *bbr)
-{
-	return bbr->cycle_idx == BBRWB_CRUISE_5;
-}
-
-static void bbrw_brutal_reset_cruise_loss_p95(struct bbr *bbr)
-{
-	bbr->cruise_loss_bins_lo = 0;
-	bbr->cruise_loss_bins_hi = 0;
-}
-
-static u32 bbrw_brutal_cruise_loss_bins(const struct bbr *bbr)
-{
-	return (u32)bbr->cruise_loss_bins_lo |
-	       ((u32)bbr->cruise_loss_bins_hi << 16);
-}
-
-static void bbrw_brutal_store_cruise_loss_bins(struct bbr *bbr, u32 bins)
-{
-	bbr->cruise_loss_bins_lo = (u16)bins;
-	bbr->cruise_loss_bins_hi = (u16)(bins >> 16);
-}
-
-static u32 bbrw_brutal_loss_bin(u32 loss_pct)
-{
-	return min_t(u32, loss_pct * BBRWB_LOSS_BINS / 101, BBRWB_LOSS_BINS - 1);
-}
-
-static u32 bbrw_brutal_loss_bin_upper(u32 bin)
-{
-	return min_t(u32, 100,
-		     DIV_ROUND_UP((bin + 1) * 101, BBRWB_LOSS_BINS) - 1);
-}
-
-static void bbrw_brutal_update_cruise_loss_p95(struct bbr *bbr, u32 loss_pct)
-{
-	u32 bins = bbrw_brutal_cruise_loss_bins(bbr);
-	u32 bin = bbrw_brutal_loss_bin(loss_pct);
-	u32 shift = bin * 2;
-	u32 count = (bins >> shift) & 0x3;
-
-	if (count < 3)
-		bins += 1U << shift;
-	bbrw_brutal_store_cruise_loss_bins(bbr, bins);
-}
-
-static u32 bbrw_brutal_cruise_loss_p95(const struct bbr *bbr)
-{
-	u32 bins = bbrw_brutal_cruise_loss_bins(bbr);
-	u32 total = 0, cumulative = 0, target;
-	u32 bin;
-
-	for (bin = 0; bin < BBRWB_LOSS_BINS; bin++)
-		total += (bins >> (bin * 2)) & 0x3;
-	if (!total)
-		return 0;
-
-	target = DIV_ROUND_UP(total * bbrw_brutal_loss_percentile, 100);
-	for (bin = 0; bin < BBRWB_LOSS_BINS; bin++) {
-		cumulative += (bins >> (bin * 2)) & 0x3;
-		if (cumulative >= target)
-			return bbrw_brutal_loss_bin_upper(bin);
-	}
-	return 100;
 }
 
 static u32 bbrw_brutal_sample_acked(const struct rate_sample *rs)
@@ -683,15 +606,6 @@ static bool bbrw_brutal_loss_guard_sample(const struct rate_sample *rs)
 	u32 guard = clamp_t(u32, bbrw_brutal_loss_guard_percent, 1, 100);
 
 	return total && (u64)losses * 100 > (u64)total * guard;
-}
-
-static bool bbrw_brutal_probe_up_loss_too_high(struct sock *sk,
-					       const struct rate_sample *rs)
-{
-	struct bbr *bbr = inet_csk_ca(sk);
-
-	return bbrw_brutal_has_loss_sample(rs) &&
-	       bbrw_brutal_sample_loss_pct(rs) > bbrw_brutal_cruise_loss_p95(bbr);
 }
 
 static bool bbrw_brutal_can_compensate(struct sock *sk)
@@ -828,8 +742,7 @@ static bool bbr_is_next_cycle_phase(struct sock *sk,
 
 	/* PROBE_UP uses gain 1.25 and no Brutal compensation. */
 	if (bbr->cycle_idx == BBRWB_PROBE_UP)
-		return bbrw_brutal_probe_up_loss_too_high(sk, rs) ||
-		       inflight >= bbr_inflight(sk, bw, bbr->pacing_gain);
+		return inflight >= bbr_inflight(sk, bw, bbr->pacing_gain);
 
 	/* DRAIN uses gain 0.75 until in-flight is <= estimated BDP. */
 	return inflight <= bbr_inflight(sk, bw, BBR_UNIT);
@@ -842,10 +755,6 @@ static void bbr_advance_cycle_phase(struct sock *sk)
 
 	bbr->cycle_idx = (bbr->cycle_idx + 1) % CYCLE_LEN;
 	bbr->cycle_mstamp = tp->delivered_mstamp;
-
-	/* The PROBE_UP loss threshold is the P95 from the last CRUISE phase. */
-	if (bbr->cycle_idx == BBRWB_CRUISE_5 || bbr->cycle_idx == BBRWB_CRUISE_0)
-		bbrw_brutal_reset_cruise_loss_p95(bbr);
 }
 
 /* Gain cycling: cycle pacing gain to converge to fair share of available bw. */
@@ -862,7 +771,6 @@ static void bbr_update_cycle_phase(struct sock *sk,
 		bbr_enter_loss_guard_recovery(sk);
 		bbr->cycle_idx = BBRWB_CRUISE_0;
 		bbr->cycle_mstamp = tp->delivered_mstamp;
-		bbrw_brutal_reset_cruise_loss_p95(bbr);
 		return;
 	}
 
@@ -886,7 +794,6 @@ static void bbr_reset_probe_bw_mode(struct sock *sk)
 	bbr->mode = BBR_PROBE_BW;
 	bbr->cycle_idx = BBRWB_CRUISE_0;
 	bbr->cycle_mstamp = tp->delivered_mstamp;
-	bbrw_brutal_reset_cruise_loss_p95(bbr);
 }
 
 /* Start a new long-term sampling interval. */
@@ -1119,9 +1026,7 @@ static void bbr_update_ack_aggregation(struct sock *sk,
 		bbr->extra_acked[bbr->extra_acked_win_idx] = extra_acked;
 }
 
-/* Track sample-level loss for Brutal compensation, LOSS_GUARD, and the
- * approximate P95 loss during the last CRUISE phase before PROBE_UP.
- */
+/* Track sample-level loss for Brutal compensation and LOSS_GUARD. */
 static void bbr_update_brutal_loss(struct sock *sk, const struct rate_sample *rs)
 {
 	struct bbr *bbr = inet_csk_ca(sk);
@@ -1132,10 +1037,6 @@ static void bbr_update_brutal_loss(struct sock *sk, const struct rate_sample *rs
 		bbr->brutal_loss_pct = loss_pct;
 	else if (bbr->round_start && bbr->brutal_loss_pct)
 		bbr->brutal_loss_pct = (bbr->brutal_loss_pct * 7) >> 3;
-
-	if (bbr->mode == BBR_PROBE_BW &&
-	    bbrw_brutal_is_loss_reference_phase(bbr) && has_sample)
-		bbrw_brutal_update_cruise_loss_p95(bbr, loss_pct);
 
 	bbr->loss_guard = bbr->lt_use_bw || bbrw_brutal_loss_guard_sample(rs);
 }
@@ -1323,7 +1224,6 @@ static void bbr_main_common(struct sock *sk, const struct rate_sample *rs)
 	bbr_set_cwnd(sk, rs, rs->acked_sacked, bw, bbr->cwnd_gain);
 }
 
-
 /*
  * Do not key this only off LINUX_VERSION_CODE. Some BBRv3/L4S trees carry
  * a 6.x version number while keeping the older two-argument cong_control hook.
@@ -1356,7 +1256,6 @@ static void bbr_init(struct sock *sk)
 	bbr->loss_guard = 0;
 	bbr->brutal_loss_pct = 0;
 	bbr->brutal_recovery = 0;
-	bbrw_brutal_reset_cruise_loss_p95(bbr);
 
 	bbr->min_rtt_us = tcp_min_rtt(tp);
 	bbr->min_rtt_stamp = tcp_jiffies32;
@@ -1450,7 +1349,6 @@ static void bbr_set_state(struct sock *sk, u8 new_state)
 		bbr->loss_guard = 1;
 		bbr->brutal_loss_pct = 100;
 		bbr->cycle_idx = BBRWB_CRUISE_0;
-		bbrw_brutal_reset_cruise_loss_p95(bbr);
 		bbr_lt_bw_sampling(sk, &rs);
 	}
 }

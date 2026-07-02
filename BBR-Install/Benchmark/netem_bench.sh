@@ -10,9 +10,9 @@
 # Useful examples:
 #   sudo ALGOS="cubic bbr reno" bash ./netem_bench.sh
 #   sudo LATENCY_MODE=full LATENCY_SWEEP="1ms 50ms 100ms 200ms 300ms" bash ./netem_bench.sh
-#   sudo ALGOS="cubic bbr reno" COMPETITOR_ALGOS="auto" SCENARIOS="flow_join flow_fairness combined_all" bash ./netem_bench.sh
+#   sudo ALGOS="cubic bbr reno" COMPETITOR_ALGOS="auto" SCENARIOS="flow_fairness combined_all" bash ./netem_bench.sh
 #   sudo BASE_RATE=200mbit DROP_RATE=25mbit POLICE_RATE=40mbit ONEWAY_DELAY=25ms bash ./netem_bench.sh
-#   sudo PARALLEL_WORKERS=4 bash ./netem_bench.sh
+#   sudo PARALLEL_WORKERS=auto bash ./netem_bench.sh
 #   sudo LIGHTWEIGHT_PARALLEL=0 bash ./netem_bench.sh
 #
 # Output:
@@ -29,7 +29,6 @@
 #       failures.csv             failed or incomplete iperf3 rows
 #       scenario-algo-summary.csv  convenience wide throughput/retransmit view
 #       flow-fairness.csv          convenience wide Jain fairness view
-#       flow-join-overlap.csv      convenience wide flow_join overlap view
 #       bufferbloat-summary.csv    convenience wide idle-vs-loaded RTT view
 #       bufferbloat-algo-summary.csv  convenience wide RTT-under-load view
 #     raw/
@@ -80,7 +79,7 @@ ALGOS="${ALGOS:-cubic bbr reno}"
 USER_SCENARIOS_SET=0
 if [[ -n "${SCENARIOS+x}" ]]; then USER_SCENARIOS_SET=1; fi
 TEST_GROUPS="${TEST_GROUPS:-}"
-SCENARIOS="${SCENARIOS:-baseline latency_spike latency_reduction jitter_light jitter_heavy jitter_long_tail reorder_light reorder_heavy capacity_drop sustain_loss loss_bursts loss_spike policer_static policer_spike policer_adaptive_rate policer_adaptive_retrans ack_rate_limit ack_loss ack_delay_spike ack_bufferbloat flow_join flow_fairness flow_fairness_sustain_loss flow_fairness_loss_spike flow_fairness_latency_spike flow_fairness_capacity_drop flow_fairness_policer flow_fairness_ack_limit flow_fairness_jitter flow_fairness_reorder flow_churn short_flow_repeated short_flow_under_load bufferbloat_upload bufferbloat_download bufferbloat_bidirectional profile_seedbox_torrent_upload profile_proxy_mobile_china}"
+SCENARIOS="${SCENARIOS:-baseline latency_spike latency_reduction jitter_light jitter_heavy jitter_long_tail reorder_light reorder_heavy capacity_drop sustain_loss loss_bursts loss_spike policer_static policer_spike policer_adaptive_rate policer_adaptive_retrans ack_rate_limit ack_loss ack_delay_spike ack_bufferbloat flow_fairness flow_fairness_sustain_loss flow_fairness_loss_spike flow_fairness_latency_spike flow_fairness_capacity_drop flow_fairness_policer flow_fairness_ack_limit flow_fairness_jitter flow_fairness_reorder short_flow_repeated short_flow_under_load bufferbloat_upload bufferbloat_download bufferbloat_bidirectional profile_proxy_mobile_china}"
 REPEATS="${REPEATS:-1}"
 
 # Lightweight multiprocessing.  Full scenario-level parallelism would share and
@@ -89,7 +88,7 @@ REPEATS="${REPEATS:-1}"
 # competition, bufferbloat, and real-world profile tests remain sequential by
 # default because they intentionally observe interactions over time.
 LIGHTWEIGHT_PARALLEL="${LIGHTWEIGHT_PARALLEL:-1}"   # 1/yes/true/on enables parent orchestration
-PARALLEL_WORKERS="${PARALLEL_WORKERS:-2}"           # use auto, 1, 2, 3...; 1 disables parallel mode
+PARALLEL_WORKERS="${PARALLEL_WORKERS:-auto}"        # auto = half of detected CPU cores; 1 disables parallel mode
 PARALLEL_LIGHTWEIGHT_SCENARIOS="${PARALLEL_LIGHTWEIGHT_SCENARIOS:-baseline latency_sweep sustain_loss jitter_light jitter_heavy jitter_long_tail reorder_light reorder_heavy ack_rate_limit ack_loss policer_static short_flow_repeated}"
 PARALLEL_CHILD="${PARALLEL_CHILD:-0}"
 
@@ -106,7 +105,7 @@ RATE_MODE="${RATE_MODE:-single}"              # single, sweep, or scenario
 RATE_SWEEP="${RATE_SWEEP:-100mbit 1gbit}"
 ENABLE_10G_STRESS="${ENABLE_10G_STRESS:-0}"
 TEN_G_RATE="${TEN_G_RATE:-10gbit}"
-TEN_G_SCENARIOS="${TEN_G_SCENARIOS:-baseline sustain_loss flow_fairness bufferbloat_upload bufferbloat_bidirectional policer_static policer_adaptive_retrans combined_all profile_seedbox_torrent_upload}"
+TEN_G_SCENARIOS="${TEN_G_SCENARIOS:-baseline sustain_loss flow_fairness bufferbloat_upload bufferbloat_bidirectional policer_static policer_adaptive_retrans combined_all}"
 RATE_LABEL_IN_SCENARIO="${RATE_LABEL_IN_SCENARIO:-auto}"
 
 ONEWAY_DELAY="${ONEWAY_DELAY:-20ms}"       # approximate baseline RTT = 2 * this
@@ -141,7 +140,6 @@ LATENCY_LOSS_SPIKE_SET="${LATENCY_LOSS_SPIKE_SET:-$LATENCY_SENSITIVE_SET}"
 LATENCY_LATENCY_SPIKE_SET="${LATENCY_LATENCY_SPIKE_SET:-$LATENCY_DYNAMIC_SET}"
 LATENCY_LATENCY_REDUCTION_SET="${LATENCY_LATENCY_REDUCTION_SET:-$LATENCY_DYNAMIC_SET}"
 LATENCY_CAPACITY_DROP_SET="${LATENCY_CAPACITY_DROP_SET:-$LATENCY_SINGLE_DEFAULT}"
-LATENCY_FLOW_JOIN_SET="${LATENCY_FLOW_JOIN_SET:-$LATENCY_COMPETITION_SET}"
 LATENCY_FLOW_FAIRNESS_SET="${LATENCY_FLOW_FAIRNESS_SET:-$LATENCY_COMPETITION_SET}"
 LATENCY_FLOW_FAIRNESS_IMPAIRMENT_SET="${LATENCY_FLOW_FAIRNESS_IMPAIRMENT_SET:-$LATENCY_COMPETITION_SET}"
 LATENCY_POLICER_STATIC_SET="${LATENCY_POLICER_STATIC_SET:-$LATENCY_SINGLE_DEFAULT}"
@@ -151,7 +149,6 @@ LATENCY_BUFFERBLOAT_SET="${LATENCY_BUFFERBLOAT_SET:-$LATENCY_SINGLE_DEFAULT}"
 LATENCY_ACK_PATH_SET="${LATENCY_ACK_PATH_SET:-$LATENCY_DYNAMIC_SET}"
 LATENCY_JITTER_REORDER_SET="${LATENCY_JITTER_REORDER_SET:-$LATENCY_SINGLE_DEFAULT}"
 LATENCY_SHORT_FLOW_SET="${LATENCY_SHORT_FLOW_SET:-1ms 50ms 100ms}"
-LATENCY_FLOW_CHURN_SET="${LATENCY_FLOW_CHURN_SET:-$LATENCY_COMPETITION_SET}"
 LATENCY_PROFILE_SET="${LATENCY_PROFILE_SET:-$LATENCY_SINGLE_DEFAULT}"
 COMBINED_LATENCY_LADDER="${COMBINED_LATENCY_LADDER:-$LATENCY_SWEEP}"
 
@@ -205,18 +202,32 @@ HIGH_LATENCY_COMPETITOR_DURATION="${HIGH_LATENCY_COMPETITOR_DURATION:-45}"
 HIGH_LATENCY_OMIT="${HIGH_LATENCY_OMIT:-10}"
 COMPETITOR_START="${COMPETITOR_START:-10}"
 COMPETITOR_DURATION="${COMPETITOR_DURATION:-20}"
-FLOW_JOIN_POST="${FLOW_JOIN_POST:-5}"
+EVENT_RECOVERY_POST="${EVENT_RECOVERY_POST:-5}"
 EVENT_AT="${EVENT_AT:-15}"
 EVENT_HOLD="${EVENT_HOLD:-10}"
 RUN_COOLDOWN="${RUN_COOLDOWN:-2}"
-# Cooldown between competitor-matrix cases inside a single scenario/algo pass.
+# Cooldown between high-interaction competition cases inside a single scenario/algo pass.
 # The original RUN_COOLDOWN only runs after run_scenario() returns, which means
-# flow_fairness_* impairment competitor pairs can otherwise reuse the same
-# iperf3 server ports immediately.
+# high-flow fairness cases can otherwise reuse the same iperf3 server ports immediately.
 COMPETITION_COOLDOWN="${COMPETITION_COOLDOWN:-$RUN_COOLDOWN}"
+# Fairness/competition scenarios run every selected congestion-control
+# algorithm together against one shared 10 Gbit/s receiver by default.
+COMPETITION_RECEIVER_RATE="${COMPETITION_RECEIVER_RATE:-10gbit}"
+# 30 minutes per fairness/competition case.
+COMPETITION_TEST_DURATION="${COMPETITION_TEST_DURATION:-1800}"
+# Dynamic all-algorithm fairness impairments use the same case duration,
+# with the impairment window defaulting to the middle third.
+COMPETITION_EVENT_AT="${COMPETITION_EVENT_AT:-auto}"
+COMPETITION_EVENT_HOLD="${COMPETITION_EVENT_HOLD:-auto}"
+# Capacity-drop fairness cases start at COMPETITION_RECEIVER_RATE, drop to
+# this rate during the impairment window, then restore the receiver rate.
+COMPETITION_DROP_RATE="${COMPETITION_DROP_RATE:-$DROP_RATE}"
+# One iperf3 flow per algorithm by default. Raise this only when you explicitly
+# want multiple equal-weight flows per algorithm in the same shared competition.
+COMPETITION_FLOWS_PER_ALGO="${COMPETITION_FLOWS_PER_ALGO:-5}"
 POST_IMPAIRMENT_SETTLE="${POST_IMPAIRMENT_SETTLE:-1}"
-# Number of competitor flows used by flow_fairness/flow_churn-style tests.
-# Total simultaneous fairness flows = 1 primary + MULTI_COMPETITOR_FLOWS.
+# Legacy pairwise-flow knob retained for older wrappers; all-algorithm fairness
+# scenarios now use COMPETITION_FLOWS_PER_ALGO instead.
 MULTI_COMPETITOR_FLOWS="${MULTI_COMPETITOR_FLOWS:-3}"
 OMIT="${OMIT:-3}"
 SS_INTERVAL="${SS_INTERVAL:-1}"
@@ -324,43 +335,97 @@ ADAPTIVE_POLICER_TRIGGER_AT="${ADAPTIVE_POLICER_TRIGGER_AT:-$EVENT_AT}"
 ADAPTIVE_POLICER_TRIGGER_HOLD="${ADAPTIVE_POLICER_TRIGGER_HOLD:-$EVENT_HOLD}"
 ADAPTIVE_POLICER_DURATION="${ADAPTIVE_POLICER_DURATION:-0}"   # 0 means use duration_for_event_delay
 
-# Short-flow and flow-churn tests.
+# Short-flow tests.
 SHORT_FLOW_COUNT="${SHORT_FLOW_COUNT:-20}"
 SHORT_FLOW_BYTES="${SHORT_FLOW_BYTES:-1M}"
 SHORT_FLOW_GAP="${SHORT_FLOW_GAP:-0.2}"
 SHORT_FLOW_LOAD_WARMUP="${SHORT_FLOW_LOAD_WARMUP:-3}"
 SHORT_FLOW_UNDER_LOAD_DURATION="${SHORT_FLOW_UNDER_LOAD_DURATION:-$EVENT_DURATION}"
-CHURN_DURATION="${CHURN_DURATION:-60}"
-CHURN_COMPETITOR_COUNT="${CHURN_COMPETITOR_COUNT:-6}"
-CHURN_INTERVAL="${CHURN_INTERVAL:-6}"
-CHURN_FLOW_DURATION="${CHURN_FLOW_DURATION:-12}"
 
-# Named real-world profiles. These set rates/delays/queues temporarily inside
-# profile-specific scenarios, without changing the global default run.
-# Seedbox: high-performing server uploading torrents while competing with other
-# servers/flows on the same network.
-SEEDBOX_UPLINK_RATE="${SEEDBOX_UPLINK_RATE:-1gbit}"
-SEEDBOX_ACK_RATE="${SEEDBOX_ACK_RATE:-1gbit}"
-SEEDBOX_BASE_DELAY="${SEEDBOX_BASE_DELAY:-5ms}"
-SEEDBOX_QUEUE_PROFILE="${SEEDBOX_QUEUE_PROFILE:-fq}"
-SEEDBOX_COMPETITOR_FLOWS="${SEEDBOX_COMPETITOR_FLOWS:-7}"
-SEEDBOX_DURATION="${SEEDBOX_DURATION:-60}"
+# Named real-world profile. This sets rates/delays/queues temporarily inside
+# the profile-specific scenario, without changing the global default run.
+# Proxy-to-China profiles: Mainland China user connects to a proxy/server
+# outside Mainland China. Direction labels are from the China user's view:
+#   client-bound = proxy/server -> China client (iperf3 -R download data path)
+#   proxy-bound  = China client -> proxy/server (upload data path)
+# The defaults are intentionally asymmetric and use worse impairment on the
+# client-bound path, following the profile guidance in Pasted markdown(2).md.
+PROXY_CHINA_PROFILE_SET="${PROXY_CHINA_PROFILE_SET:-mobile_typical mobile_poor lan_typical lan_poor}"
+PROXY_CHINA_DIRECTION_SET="${PROXY_CHINA_DIRECTION_SET:-download upload}"
+# Use "1 6 30" for the full proxy-specific concurrency matrix; default stays
+# light enough for the broader benchmark suite.
+PROXY_CHINA_PARALLEL_SET="${PROXY_CHINA_PARALLEL_SET:-1}"
+PROXY_CHINA_PHASE_SECONDS="${PROXY_CHINA_PHASE_SECONDS:-${PROXY_MOBILE_PHASE_SECONDS:-8}}"
+PROXY_CHINA_DURATION="${PROXY_CHINA_DURATION:-${PROXY_MOBILE_DURATION:-0}}"  # 0/auto = derive from phase schedule
+PROXY_CHINA_QUEUE_PROFILE="${PROXY_CHINA_QUEUE_PROFILE:-netem_fifo}"
+PROXY_CHINA_ENABLE_STALLS="${PROXY_CHINA_ENABLE_STALLS:-1}"
+PROXY_CHINA_STALL_SECONDS="${PROXY_CHINA_STALL_SECONDS:-2}"
+PROXY_CHINA_STALL_TARGET="${PROXY_CHINA_STALL_TARGET:-client_bound}"  # client_bound, proxy_bound, or both
+PROXY_CHINA_ENABLE_PROFILE_SWING="${PROXY_CHINA_ENABLE_PROFILE_SWING:-1}"
 
-# Proxy-to-mobile-China: server-to-mobile downstream with jitter, occasional
-# packet drops, rate collapses, and recovery phases on the reverse data path.
-PROXY_BACKHAUL_RATE="${PROXY_BACKHAUL_RATE:-1gbit}"
-PROXY_MOBILE_RATE="${PROXY_MOBILE_RATE:-80mbit}"
-PROXY_MOBILE_DROP_RATE="${PROXY_MOBILE_DROP_RATE:-15mbit}"
-PROXY_MOBILE_BASE_DELAY="${PROXY_MOBILE_BASE_DELAY:-120ms}"
-PROXY_MOBILE_HIGH_DELAY="${PROXY_MOBILE_HIGH_DELAY:-260ms}"
-PROXY_MOBILE_BASE_LOSS="${PROXY_MOBILE_BASE_LOSS:-0.2%}"
-PROXY_MOBILE_SPIKE_LOSS="${PROXY_MOBILE_SPIKE_LOSS:-5%}"
-PROXY_MOBILE_RECOVERY_LOSS="${PROXY_MOBILE_RECOVERY_LOSS:-0.5%}"
-PROXY_MOBILE_JITTER_EXTRA="${PROXY_MOBILE_JITTER_EXTRA:-30ms 50% distribution normal}"
-PROXY_MOBILE_LONGTAIL_EXTRA="${PROXY_MOBILE_LONGTAIL_EXTRA:-120ms 75% distribution paretonormal}"
-PROXY_MOBILE_QUEUE_PROFILE="${PROXY_MOBILE_QUEUE_PROFILE:-fq}"
-PROXY_MOBILE_PHASE_SECONDS="${PROXY_MOBILE_PHASE_SECONDS:-8}"
-PROXY_MOBILE_DURATION="${PROXY_MOBILE_DURATION:-0}"
+# Profile defaults. "DOWN" means client-bound/proxy->China-client; "UP" means
+# proxy-bound/China-client->proxy. Each profile also supplies netem delay
+# jitter/correlation, loss correlation, optional slotting, and queue limit.
+PROXY_CHINA_MOBILE_TYPICAL_DOWN_RATE="${PROXY_CHINA_MOBILE_TYPICAL_DOWN_RATE:-15mbit}"
+PROXY_CHINA_MOBILE_TYPICAL_UP_RATE="${PROXY_CHINA_MOBILE_TYPICAL_UP_RATE:-5mbit}"
+PROXY_CHINA_MOBILE_TYPICAL_DOWN_DELAY="${PROXY_CHINA_MOBILE_TYPICAL_DOWN_DELAY:-85ms}"
+PROXY_CHINA_MOBILE_TYPICAL_UP_DELAY="${PROXY_CHINA_MOBILE_TYPICAL_UP_DELAY:-60ms}"
+PROXY_CHINA_MOBILE_TYPICAL_DOWN_JITTER="${PROXY_CHINA_MOBILE_TYPICAL_DOWN_JITTER:-35ms}"
+PROXY_CHINA_MOBILE_TYPICAL_UP_JITTER="${PROXY_CHINA_MOBILE_TYPICAL_UP_JITTER:-20ms}"
+PROXY_CHINA_MOBILE_TYPICAL_DOWN_LOSS="${PROXY_CHINA_MOBILE_TYPICAL_DOWN_LOSS:-0.8%}"
+PROXY_CHINA_MOBILE_TYPICAL_UP_LOSS="${PROXY_CHINA_MOBILE_TYPICAL_UP_LOSS:-0.3%}"
+PROXY_CHINA_MOBILE_TYPICAL_DIST="${PROXY_CHINA_MOBILE_TYPICAL_DIST:-paretonormal}"
+PROXY_CHINA_MOBILE_TYPICAL_JITTER_CORR="${PROXY_CHINA_MOBILE_TYPICAL_JITTER_CORR:-60%}"
+PROXY_CHINA_MOBILE_TYPICAL_LOSS_CORR="${PROXY_CHINA_MOBILE_TYPICAL_LOSS_CORR:-40%}"
+PROXY_CHINA_MOBILE_TYPICAL_LIMIT="${PROXY_CHINA_MOBILE_TYPICAL_LIMIT:-1500}"
+PROXY_CHINA_MOBILE_TYPICAL_SLOT_ARGS="${PROXY_CHINA_MOBILE_TYPICAL_SLOT_ARGS:-slot distribution normal 8ms 4ms packets 64}"
+
+PROXY_CHINA_MOBILE_POOR_DOWN_RATE="${PROXY_CHINA_MOBILE_POOR_DOWN_RATE:-3mbit}"
+PROXY_CHINA_MOBILE_POOR_UP_RATE="${PROXY_CHINA_MOBILE_POOR_UP_RATE:-1mbit}"
+PROXY_CHINA_MOBILE_POOR_DOWN_DELAY="${PROXY_CHINA_MOBILE_POOR_DOWN_DELAY:-160ms}"
+PROXY_CHINA_MOBILE_POOR_UP_DELAY="${PROXY_CHINA_MOBILE_POOR_UP_DELAY:-120ms}"
+PROXY_CHINA_MOBILE_POOR_DOWN_JITTER="${PROXY_CHINA_MOBILE_POOR_DOWN_JITTER:-80ms}"
+PROXY_CHINA_MOBILE_POOR_UP_JITTER="${PROXY_CHINA_MOBILE_POOR_UP_JITTER:-50ms}"
+PROXY_CHINA_MOBILE_POOR_DOWN_LOSS="${PROXY_CHINA_MOBILE_POOR_DOWN_LOSS:-3.0%}"
+PROXY_CHINA_MOBILE_POOR_UP_LOSS="${PROXY_CHINA_MOBILE_POOR_UP_LOSS:-1.0%}"
+PROXY_CHINA_MOBILE_POOR_DIST="${PROXY_CHINA_MOBILE_POOR_DIST:-paretonormal}"
+PROXY_CHINA_MOBILE_POOR_JITTER_CORR="${PROXY_CHINA_MOBILE_POOR_JITTER_CORR:-75%}"
+PROXY_CHINA_MOBILE_POOR_LOSS_CORR="${PROXY_CHINA_MOBILE_POOR_LOSS_CORR:-70%}"
+PROXY_CHINA_MOBILE_POOR_LIMIT="${PROXY_CHINA_MOBILE_POOR_LIMIT:-1000}"
+PROXY_CHINA_MOBILE_POOR_SLOT_ARGS="${PROXY_CHINA_MOBILE_POOR_SLOT_ARGS:-slot distribution normal 12ms 8ms packets 32}"
+
+PROXY_CHINA_LAN_TYPICAL_DOWN_RATE="${PROXY_CHINA_LAN_TYPICAL_DOWN_RATE:-100mbit}"
+PROXY_CHINA_LAN_TYPICAL_UP_RATE="${PROXY_CHINA_LAN_TYPICAL_UP_RATE:-40mbit}"
+PROXY_CHINA_LAN_TYPICAL_DOWN_DELAY="${PROXY_CHINA_LAN_TYPICAL_DOWN_DELAY:-60ms}"
+PROXY_CHINA_LAN_TYPICAL_UP_DELAY="${PROXY_CHINA_LAN_TYPICAL_UP_DELAY:-45ms}"
+PROXY_CHINA_LAN_TYPICAL_DOWN_JITTER="${PROXY_CHINA_LAN_TYPICAL_DOWN_JITTER:-10ms}"
+PROXY_CHINA_LAN_TYPICAL_UP_JITTER="${PROXY_CHINA_LAN_TYPICAL_UP_JITTER:-8ms}"
+PROXY_CHINA_LAN_TYPICAL_DOWN_LOSS="${PROXY_CHINA_LAN_TYPICAL_DOWN_LOSS:-0.10%}"
+PROXY_CHINA_LAN_TYPICAL_UP_LOSS="${PROXY_CHINA_LAN_TYPICAL_UP_LOSS:-0.05%}"
+PROXY_CHINA_LAN_TYPICAL_DIST="${PROXY_CHINA_LAN_TYPICAL_DIST:-normal}"
+PROXY_CHINA_LAN_TYPICAL_JITTER_CORR="${PROXY_CHINA_LAN_TYPICAL_JITTER_CORR:-40%}"
+PROXY_CHINA_LAN_TYPICAL_LOSS_CORR="${PROXY_CHINA_LAN_TYPICAL_LOSS_CORR:-25%}"
+PROXY_CHINA_LAN_TYPICAL_LIMIT="${PROXY_CHINA_LAN_TYPICAL_LIMIT:-3000}"
+PROXY_CHINA_LAN_TYPICAL_SLOT_ARGS="${PROXY_CHINA_LAN_TYPICAL_SLOT_ARGS:-}"
+
+PROXY_CHINA_LAN_POOR_DOWN_RATE="${PROXY_CHINA_LAN_POOR_DOWN_RATE:-15mbit}"
+PROXY_CHINA_LAN_POOR_UP_RATE="${PROXY_CHINA_LAN_POOR_UP_RATE:-8mbit}"
+PROXY_CHINA_LAN_POOR_DOWN_DELAY="${PROXY_CHINA_LAN_POOR_DOWN_DELAY:-130ms}"
+PROXY_CHINA_LAN_POOR_UP_DELAY="${PROXY_CHINA_LAN_POOR_UP_DELAY:-100ms}"
+PROXY_CHINA_LAN_POOR_DOWN_JITTER="${PROXY_CHINA_LAN_POOR_DOWN_JITTER:-45ms}"
+PROXY_CHINA_LAN_POOR_UP_JITTER="${PROXY_CHINA_LAN_POOR_UP_JITTER:-30ms}"
+PROXY_CHINA_LAN_POOR_DOWN_LOSS="${PROXY_CHINA_LAN_POOR_DOWN_LOSS:-1.2%}"
+PROXY_CHINA_LAN_POOR_UP_LOSS="${PROXY_CHINA_LAN_POOR_UP_LOSS:-0.5%}"
+PROXY_CHINA_LAN_POOR_DIST="${PROXY_CHINA_LAN_POOR_DIST:-paretonormal}"
+PROXY_CHINA_LAN_POOR_JITTER_CORR="${PROXY_CHINA_LAN_POOR_JITTER_CORR:-65%}"
+PROXY_CHINA_LAN_POOR_LOSS_CORR="${PROXY_CHINA_LAN_POOR_LOSS_CORR:-60%}"
+PROXY_CHINA_LAN_POOR_LIMIT="${PROXY_CHINA_LAN_POOR_LIMIT:-2000}"
+PROXY_CHINA_LAN_POOR_SLOT_ARGS="${PROXY_CHINA_LAN_POOR_SLOT_ARGS:-}"
+
+# Legacy names kept only for older wrappers and outer rate/latency labels. The
+# new profile function uses the PROXY_CHINA_* knobs above.
+PROXY_BACKHAUL_RATE="${PROXY_BACKHAUL_RATE:-$PROXY_CHINA_LAN_TYPICAL_DOWN_RATE}"
+PROXY_MOBILE_BASE_DELAY="${PROXY_MOBILE_BASE_DELAY:-$PROXY_CHINA_MOBILE_TYPICAL_DOWN_DELAY}"
 
 # Competition matrix controls.
 # COMPETITOR_ALGOS=auto means: for every primary algorithm in ALGOS, run
@@ -407,7 +472,6 @@ MANIFEST_JSON="${OUT_DIR}/manifest.json"
 ANALYSIS_REPORT="${OUT_DIR}/report.md"
 SCENARIO_ALGO_CSV="${DATA_DIR}/scenario-algo-summary.csv"
 FLOW_FAIRNESS_CSV="${DATA_DIR}/flow-fairness.csv"
-FLOW_JOIN_OVERLAP_CSV="${DATA_DIR}/flow-join-overlap.csv"
 BUFFERBLOAT_CSV="${DATA_DIR}/bufferbloat-summary.csv"
 BUFFERBLOAT_ALGO_CSV="${DATA_DIR}/bufferbloat-algo-summary.csv"
 BUFFERBLOAT_QUEUE_CSV="${DATA_DIR}/bufferbloat-queue-summary.csv"
@@ -505,7 +569,6 @@ setup_dirs() {
     echo "latency_latency_spike_set=${LATENCY_LATENCY_SPIKE_SET}"
     echo "latency_latency_reduction_set=${LATENCY_LATENCY_REDUCTION_SET}"
     echo "latency_capacity_drop_set=${LATENCY_CAPACITY_DROP_SET}"
-    echo "latency_flow_join_set=${LATENCY_FLOW_JOIN_SET}"
     echo "latency_flow_fairness_set=${LATENCY_FLOW_FAIRNESS_SET}"
     echo "latency_policer_static_set=${LATENCY_POLICER_STATIC_SET}"
     echo "latency_policer_spike_set=${LATENCY_POLICER_SPIKE_SET}"
@@ -516,9 +579,16 @@ setup_dirs() {
     echo "high_latency_event_duration=${HIGH_LATENCY_EVENT_DURATION}"
     echo "high_latency_competitor_duration=${HIGH_LATENCY_COMPETITOR_DURATION}"
     echo "high_latency_omit=${HIGH_LATENCY_OMIT}"
-    echo "flow_join_post=${FLOW_JOIN_POST}"
+    echo "event_recovery_post=${EVENT_RECOVERY_POST}"
     echo "run_cooldown=${RUN_COOLDOWN}"
     echo "competition_cooldown=${COMPETITION_COOLDOWN}"
+    echo "competition_receiver_rate=${COMPETITION_RECEIVER_RATE}"
+    echo "competition_test_duration=${COMPETITION_TEST_DURATION}"
+    echo "competition_event_at=${COMPETITION_EVENT_AT}"
+    echo "competition_event_hold=${COMPETITION_EVENT_HOLD}"
+    echo "competition_drop_rate=${COMPETITION_DROP_RATE}"
+    echo "competition_flows_per_algo=${COMPETITION_FLOWS_PER_ALGO}"
+    echo "competition_execution_model=all_selected_algorithms_shared_receiver"
     echo "post_impairment_settle=${POST_IMPAIRMENT_SETTLE}"
     echo "competitor_algos=${COMPETITOR_ALGOS}"
     echo "multi_competitor_flows=${MULTI_COMPETITOR_FLOWS}"
@@ -572,27 +642,20 @@ setup_dirs() {
     echo "short_flow_gap=${SHORT_FLOW_GAP}"
     echo "short_flow_load_warmup=${SHORT_FLOW_LOAD_WARMUP}"
     echo "short_flow_under_load_duration=${SHORT_FLOW_UNDER_LOAD_DURATION}"
-    echo "churn_duration=${CHURN_DURATION}"
-    echo "churn_competitor_count=${CHURN_COMPETITOR_COUNT}"
-    echo "seedbox_uplink_rate=${SEEDBOX_UPLINK_RATE}"
-    echo "seedbox_ack_rate=${SEEDBOX_ACK_RATE}"
-    echo "seedbox_base_delay=${SEEDBOX_BASE_DELAY}"
-    echo "seedbox_queue_profile=${SEEDBOX_QUEUE_PROFILE}"
-    echo "seedbox_competitor_flows=${SEEDBOX_COMPETITOR_FLOWS}"
-    echo "seedbox_duration=${SEEDBOX_DURATION}"
-    echo "proxy_backhaul_rate=${PROXY_BACKHAUL_RATE}"
-    echo "proxy_mobile_rate=${PROXY_MOBILE_RATE}"
-    echo "proxy_mobile_drop_rate=${PROXY_MOBILE_DROP_RATE}"
-    echo "proxy_mobile_base_delay=${PROXY_MOBILE_BASE_DELAY}"
-    echo "proxy_mobile_high_delay=${PROXY_MOBILE_HIGH_DELAY}"
-    echo "proxy_mobile_base_loss=${PROXY_MOBILE_BASE_LOSS}"
-    echo "proxy_mobile_spike_loss=${PROXY_MOBILE_SPIKE_LOSS}"
-    echo "proxy_mobile_recovery_loss=${PROXY_MOBILE_RECOVERY_LOSS}"
-    echo "proxy_mobile_jitter_extra=${PROXY_MOBILE_JITTER_EXTRA}"
-    echo "proxy_mobile_longtail_extra=${PROXY_MOBILE_LONGTAIL_EXTRA}"
-    echo "proxy_mobile_queue_profile=${PROXY_MOBILE_QUEUE_PROFILE}"
-    echo "proxy_mobile_phase_seconds=${PROXY_MOBILE_PHASE_SECONDS}"
-    echo "proxy_mobile_duration=${PROXY_MOBILE_DURATION}"
+    echo "proxy_china_profile_set=${PROXY_CHINA_PROFILE_SET}"
+    echo "proxy_china_direction_set=${PROXY_CHINA_DIRECTION_SET}"
+    echo "proxy_china_parallel_set=${PROXY_CHINA_PARALLEL_SET}"
+    echo "proxy_china_phase_seconds=${PROXY_CHINA_PHASE_SECONDS}"
+    echo "proxy_china_duration=${PROXY_CHINA_DURATION}"
+    echo "proxy_china_queue_profile=${PROXY_CHINA_QUEUE_PROFILE}"
+    echo "proxy_china_enable_stalls=${PROXY_CHINA_ENABLE_STALLS}"
+    echo "proxy_china_stall_seconds=${PROXY_CHINA_STALL_SECONDS}"
+    echo "proxy_china_stall_target=${PROXY_CHINA_STALL_TARGET}"
+    echo "proxy_china_enable_profile_swing=${PROXY_CHINA_ENABLE_PROFILE_SWING}"
+    echo "proxy_china_mobile_typical=down:${PROXY_CHINA_MOBILE_TYPICAL_DOWN_RATE},${PROXY_CHINA_MOBILE_TYPICAL_DOWN_DELAY},jitter:${PROXY_CHINA_MOBILE_TYPICAL_DOWN_JITTER},loss:${PROXY_CHINA_MOBILE_TYPICAL_DOWN_LOSS};up:${PROXY_CHINA_MOBILE_TYPICAL_UP_RATE},${PROXY_CHINA_MOBILE_TYPICAL_UP_DELAY},jitter:${PROXY_CHINA_MOBILE_TYPICAL_UP_JITTER},loss:${PROXY_CHINA_MOBILE_TYPICAL_UP_LOSS};dist:${PROXY_CHINA_MOBILE_TYPICAL_DIST};jitter_corr:${PROXY_CHINA_MOBILE_TYPICAL_JITTER_CORR};loss_corr:${PROXY_CHINA_MOBILE_TYPICAL_LOSS_CORR};slot:${PROXY_CHINA_MOBILE_TYPICAL_SLOT_ARGS}"
+    echo "proxy_china_mobile_poor=down:${PROXY_CHINA_MOBILE_POOR_DOWN_RATE},${PROXY_CHINA_MOBILE_POOR_DOWN_DELAY},jitter:${PROXY_CHINA_MOBILE_POOR_DOWN_JITTER},loss:${PROXY_CHINA_MOBILE_POOR_DOWN_LOSS};up:${PROXY_CHINA_MOBILE_POOR_UP_RATE},${PROXY_CHINA_MOBILE_POOR_UP_DELAY},jitter:${PROXY_CHINA_MOBILE_POOR_UP_JITTER},loss:${PROXY_CHINA_MOBILE_POOR_UP_LOSS};dist:${PROXY_CHINA_MOBILE_POOR_DIST};jitter_corr:${PROXY_CHINA_MOBILE_POOR_JITTER_CORR};loss_corr:${PROXY_CHINA_MOBILE_POOR_LOSS_CORR};slot:${PROXY_CHINA_MOBILE_POOR_SLOT_ARGS}"
+    echo "proxy_china_lan_typical=down:${PROXY_CHINA_LAN_TYPICAL_DOWN_RATE},${PROXY_CHINA_LAN_TYPICAL_DOWN_DELAY},jitter:${PROXY_CHINA_LAN_TYPICAL_DOWN_JITTER},loss:${PROXY_CHINA_LAN_TYPICAL_DOWN_LOSS};up:${PROXY_CHINA_LAN_TYPICAL_UP_RATE},${PROXY_CHINA_LAN_TYPICAL_UP_DELAY},jitter:${PROXY_CHINA_LAN_TYPICAL_UP_JITTER},loss:${PROXY_CHINA_LAN_TYPICAL_UP_LOSS};dist:${PROXY_CHINA_LAN_TYPICAL_DIST};jitter_corr:${PROXY_CHINA_LAN_TYPICAL_JITTER_CORR};loss_corr:${PROXY_CHINA_LAN_TYPICAL_LOSS_CORR};slot:${PROXY_CHINA_LAN_TYPICAL_SLOT_ARGS}"
+    echo "proxy_china_lan_poor=down:${PROXY_CHINA_LAN_POOR_DOWN_RATE},${PROXY_CHINA_LAN_POOR_DOWN_DELAY},jitter:${PROXY_CHINA_LAN_POOR_DOWN_JITTER},loss:${PROXY_CHINA_LAN_POOR_DOWN_LOSS};up:${PROXY_CHINA_LAN_POOR_UP_RATE},${PROXY_CHINA_LAN_POOR_UP_DELAY},jitter:${PROXY_CHINA_LAN_POOR_UP_JITTER},loss:${PROXY_CHINA_LAN_POOR_UP_LOSS};dist:${PROXY_CHINA_LAN_POOR_DIST};jitter_corr:${PROXY_CHINA_LAN_POOR_JITTER_CORR};loss_corr:${PROXY_CHINA_LAN_POOR_LOSS_CORR};slot:${PROXY_CHINA_LAN_POOR_SLOT_ARGS}"
     echo "base_port=${BASE_PORT}"
     echo "server_count=${SERVER_COUNT}"
     echo "port_rotation=${PORT_ROTATION}"
@@ -778,8 +841,7 @@ select_competitor_algos() {
   if ((${#selected[@]} == 0)); then
     selected=("${SELECTED_ALGOS[@]}")
   fi
-  printf '%s
-' "${selected[@]}"
+  printf '%s\n' "${selected[@]}"
 }
 
 start_servers() {
@@ -975,10 +1037,8 @@ latency_values_for_scenario() {
     latency_spike) printf '%s\n' "$LATENCY_LATENCY_SPIKE_SET" ;;
     latency_reduction) printf '%s\n' "$LATENCY_LATENCY_REDUCTION_SET" ;;
     capacity_drop) printf '%s\n' "$LATENCY_CAPACITY_DROP_SET" ;;
-    flow_join) printf '%s\n' "$LATENCY_FLOW_JOIN_SET" ;;
     flow_fairness) printf '%s\n' "$LATENCY_FLOW_FAIRNESS_SET" ;;
     flow_fairness_sustain_loss|flow_fairness_loss_spike|flow_fairness_latency_spike|flow_fairness_capacity_drop|flow_fairness_policer|flow_fairness_ack_limit|flow_fairness_jitter|flow_fairness_reorder) printf '%s\n' "$LATENCY_FLOW_FAIRNESS_IMPAIRMENT_SET" ;;
-    flow_churn) printf '%s\n' "$LATENCY_FLOW_CHURN_SET" ;;
     policer_static) printf '%s\n' "$LATENCY_POLICER_STATIC_SET" ;;
     policer_spike) printf '%s\n' "$LATENCY_POLICER_SPIKE_SET" ;;
     policer_adaptive_rate|policer_adaptive_retrans) printf '%s\n' "$LATENCY_POLICER_ADAPTIVE_SET" ;;
@@ -986,8 +1046,7 @@ latency_values_for_scenario() {
     ack_rate_limit|ack_loss|ack_delay_spike|ack_bufferbloat) printf '%s\n' "$LATENCY_ACK_PATH_SET" ;;
     jitter_light|jitter_heavy|jitter_long_tail|reorder_light|reorder_heavy) printf '%s\n' "$LATENCY_JITTER_REORDER_SET" ;;
     short_flow_repeated|short_flow_under_load) printf '%s\n' "$LATENCY_SHORT_FLOW_SET" ;;
-    profile_seedbox_torrent_upload) printf '%s\n' "$SEEDBOX_BASE_DELAY" ;;
-    profile_proxy_mobile_china) printf '%s\n' "$PROXY_MOBILE_BASE_DELAY" ;;
+    profile_proxy_mobile_china) printf '%s\n' "$PROXY_CHINA_MOBILE_TYPICAL_DOWN_DELAY" ;;
     profile_*) printf '%s\n' "$LATENCY_PROFILE_SET" ;;
     *) printf '%s\n' "$LATENCY_SINGLE_DEFAULT" ;;
   esac
@@ -1026,15 +1085,41 @@ duration_for_event_delay() {
   printf '%s\n' "$EVENT_DURATION"
 }
 
-duration_for_competitor_delay() {
-  local delay="$1"
-  if [[ "$ADAPTIVE_DURATION" == "1" || "$ADAPTIVE_DURATION" == "yes" || "$ADAPTIVE_DURATION" == "true" ]]; then
-    if delay_is_high_latency "$delay"; then
-      max_int "$COMPETITOR_DURATION" "$HIGH_LATENCY_COMPETITOR_DURATION"
-      return
-    fi
+
+duration_for_competition_fairness() {
+  if ! is_positive_integer "$COMPETITION_TEST_DURATION"; then
+    die "COMPETITION_TEST_DURATION must be a positive integer number of seconds"
   fi
-  printf '%s\n' "$COMPETITOR_DURATION"
+  printf '%s\n' "$COMPETITION_TEST_DURATION"
+}
+
+competition_window_value() {
+  local value="$1" duration="$2" which="$3" fallback
+  if [[ "$value" == "auto" || -z "$value" ]]; then
+    fallback=$((duration / 3))
+    (( fallback < 1 )) && fallback=1
+    printf '%s\n' "$fallback"
+    return
+  fi
+  if ! is_positive_integer "$value"; then
+    die "${which} must be auto or a positive integer number of seconds"
+  fi
+  printf '%s\n' "$value"
+}
+
+competition_impairment_window() {
+  local duration="$1" at hold
+  at="$(competition_window_value "$COMPETITION_EVENT_AT" "$duration" COMPETITION_EVENT_AT)"
+  hold="$(competition_window_value "$COMPETITION_EVENT_HOLD" "$duration" COMPETITION_EVENT_HOLD)"
+  if (( at >= duration )); then
+    at=$((duration / 3))
+    (( at < 1 )) && at=1
+  fi
+  if (( at + hold > duration )); then
+    hold=$((duration - at))
+    (( hold < 1 )) && hold=1
+  fi
+  printf '%s %s\n' "$at" "$hold"
 }
 
 omit_for_delay() {
@@ -1299,8 +1384,7 @@ allocate_port_block() {
 
 effective_multi_total_flows() {
   is_positive_integer "$MULTI_COMPETITOR_FLOWS" || die "MULTI_COMPETITOR_FLOWS must be a positive integer"
-  printf '%s
-' "$((MULTI_COMPETITOR_FLOWS + 1))"
+  printf '%s\n' "$((MULTI_COMPETITOR_FLOWS + 1))"
 }
 
 effective_combined_total_flows() {
@@ -1313,6 +1397,50 @@ effective_combined_total_flows() {
   fi
   printf '%s\n' "$total"
 }
+
+is_all_algo_competition_scenario() {
+  case "$1" in
+    flow_fairness|flow_fairness_*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+competition_algo_list() {
+  local algo seen=" "
+  for algo in "${SELECTED_ALGOS[@]}" "${COMPETITOR_ALGO_LIST[@]}"; do
+    [[ -n "$algo" ]] || continue
+    if [[ "$seen" != *" $algo "* ]]; then
+      seen+="$algo "
+      printf '%s\n' "$algo"
+    fi
+  done
+}
+
+competition_algo_label() {
+  local out="" sep="" algo
+  for algo in "$@"; do
+    [[ -n "$algo" ]] || continue
+    out="${out}${sep}${algo}"
+    sep="_"
+  done
+  safe_name "${out:-none}"
+}
+
+competition_peer_label() {
+  local out="" sep="" algo
+  for algo in "$@"; do
+    [[ -n "$algo" ]] || continue
+    out="${out}${sep}${algo}"
+    sep="|"
+  done
+  printf '%s\n' "all:${out:-none}"
+}
+
+should_run_all_algo_competition_once() {
+  local algo="$1" first="${SELECTED_ALGOS[0]:-}"
+  [[ -n "$first" && "$algo" == "$first" ]]
+}
+
 
 event_log_init() {
   local file="$1"
@@ -1391,7 +1519,7 @@ def infer_phase(name, extra):
     if m:
         return m.group(1)
     n = (name or '').lower()
-    for token in ['idle', 'loaded', 'recovery', 'latency', 'loss', 'capacity', 'policer', 'ack', 'jitter', 'reorder', 'flow_join', 'flow_fairness', 'seedbox', 'proxy_mobile']:
+    for token in ['idle', 'loaded', 'recovery', 'latency', 'loss', 'capacity', 'policer', 'ack', 'jitter', 'reorder', 'flow_fairness', 'proxy_mobile']:
         if token in n:
             return token
     return name or ''
@@ -1418,7 +1546,7 @@ def infer_target_parameter(name, extra):
         target, parameter = 'data_path', 'delay'
     elif 'capacity' in text or 'rate' in text:
         target, parameter = 'data_path', 'rate'
-    elif 'flow' in text or 'competitor' in text or 'churn' in text or 'torrent' in text or 'seedbox' in text:
+    elif 'flow' in text or 'competitor' in text:
         target, parameter = 'flow', 'flow_state'
     else:
         target, parameter = 'controller', 'event'
@@ -1679,7 +1807,7 @@ def infer_direction(role, data):
         return "bidirectional"
     if "download" in r or "reverse" in r or "proxy" in r:
         return "download"
-    if "upload" in r or "seed" in r or "torrent" in r:
+    if "upload" in r:
         return "upload"
     try:
         test = ((data or {}).get("start", {}) or {}).get("test_start", {}) or {}
@@ -2275,196 +2403,52 @@ run_latency_sweep() {
   done
 }
 
-run_competitor_test() {
-  local primary_algo="$1"
-  local repeat="$2"
-  local competitor_algo="$3"
-  local scenario_base="${4:-flow_join}"
-  local duration competitor_duration minimum_primary_duration
-  local active_delay
+run_all_algo_fairness_impairment() {
+  local repeat="$1"
+  local scenario_base="$2"
+  local impairment="${3:-clean}"
+  local active_delay duration total_flows flows_per_algo variant flow_group case_label event_file ss_file tc_file
+  local competition_event_at competition_event_hold competition_drop_rate
   active_delay="$(current_delay)"
-  duration="$(duration_for_event_delay "$active_delay")"
-  competitor_duration="$(duration_for_competitor_delay "$active_delay")"
-  minimum_primary_duration=$((COMPETITOR_START + competitor_duration + FLOW_JOIN_POST))
-  if (( duration < minimum_primary_duration )); then
-    duration="$minimum_primary_duration"
+  duration="$(duration_for_competition_fairness)"
+  read -r competition_event_at competition_event_hold < <(competition_impairment_window "$duration")
+  competition_drop_rate="${COMPETITION_DROP_RATE:-$DROP_RATE}"
+
+  local -a compete_algos=()
+  mapfile -t compete_algos < <(competition_algo_list)
+  ((${#compete_algos[@]})) || die "No congestion-control algorithms selected for all-algorithm fairness competition"
+  is_positive_integer "$COMPETITION_FLOWS_PER_ALGO" || die "COMPETITION_FLOWS_PER_ALGO must be a positive integer"
+  flows_per_algo=$((10#$COMPETITION_FLOWS_PER_ALGO))
+  total_flows=$(( ${#compete_algos[@]} * flows_per_algo ))
+  if (( total_flows > SERVER_COUNT )); then
+    die "${scenario_base} all-algorithm competition needs SERVER_COUNT>=${total_flows}; current SERVER_COUNT=${SERVER_COUNT}"
   fi
-  local case_label="${scenario_base}__${primary_algo}_vs_${competitor_algo}"
-  local variant flow_group event_file primary_port competitor_port port_base
-  variant="$(variant_for_pair "$primary_algo" "$competitor_algo")"
-  flow_group="${case_label}_r${repeat}"
-  event_file="${EVENTS_RAW_DIR}/$(safe_name "${flow_group}").csv"
-  allocate_port_block port_base 2
-  primary_port="$port_base"
-  competitor_port=$((port_base + 1))
-
-  clear_policer
-  setup_shapers "$BASE_RATE" "$active_delay" "0%"
-  event_log_init "$event_file"
-  event_log "$event_file" "primary_start_${primary_algo}_vs_${competitor_algo},${BASE_RATE},${active_delay},0%,,"
-
-  local primary_tag comp_tag primary_json comp_json primary_stderr comp_stderr primary_ss comp_ss primary_tc comp_tc
-  primary_tag="$(safe_name "${case_label}_primary_${primary_algo}_r${repeat}_P1_p${primary_port}")"
-  comp_tag="$(safe_name "${case_label}_competitor_${competitor_algo}_r${repeat}_P1_p${competitor_port}")"
-  primary_json="${JSON_DIR}/${primary_tag}.json"
-  comp_json="${JSON_DIR}/${comp_tag}.json"
-  primary_stderr="${STDERR_DIR}/${primary_tag}.stderr"
-  comp_stderr="${STDERR_DIR}/${comp_tag}.stderr"
-  primary_ss="${SS_DIR}/${primary_tag}.sslog"
-  comp_ss="${SS_DIR}/${comp_tag}.sslog"
-  primary_tc="${TC_DIR}/${primary_tag}.tc"
-  comp_tc="${TC_DIR}/${comp_tag}.tc"
-
-  flush_tcp_metrics
-  local primary_ss_pid comp_ss_pid primary_pid comp_pid
-  primary_ss_pid="$(start_ss_logger "$primary_ss" "$duration")"
-
-  set +e
-  run_iperf_capture "$primary_json" "$primary_stderr" "$primary_algo" "$duration" 1 "$primary_port" &
-  primary_pid=$!
-  set -e
-
-  sleep "$COMPETITOR_START"
-  event_log "$event_file" "competitor_start_${competitor_algo},${BASE_RATE},${active_delay},0%,,"
-  comp_ss_pid="$(start_ss_logger "$comp_ss" "$competitor_duration")"
-
-  set +e
-  run_iperf_capture "$comp_json" "$comp_stderr" "$competitor_algo" "$competitor_duration" 1 "$competitor_port" &
-  comp_pid=$!
-  wait "$comp_pid"; local comp_rc=$?
-  wait "$primary_pid"; local primary_rc=$?
-  set -e
-
-  event_log "$event_file" "competitor_end_${competitor_algo},${BASE_RATE},${active_delay},0%,,"
-  kill "$primary_ss_pid" "$comp_ss_pid" 2>/dev/null || true
-  wait "$primary_ss_pid" "$comp_ss_pid" 2>/dev/null || true
-  capture_tc_state "$primary_tc"
-  cp "$primary_tc" "$comp_tc" 2>/dev/null || true
-
-  append_json_results "$primary_json" "$case_label" primary "$primary_algo" "$repeat" 1 "$duration" "$primary_rc" "$primary_stderr" \
-    "$variant" "$flow_group" "$competitor_algo" "$active_delay" "$BASE_RATE" "0%" "" "0"
-  append_json_results "$comp_json" "$case_label" competitor "$competitor_algo" "$repeat" 1 "$competitor_duration" "$comp_rc" "$comp_stderr" \
-    "$variant" "$flow_group" "$primary_algo" "$active_delay" "$BASE_RATE" "0%" "" "$COMPETITOR_START"
-}
-
-run_multiflow_competition() {
-  local primary_algo="$1"
-  local repeat="$2"
-  local competitor_algo="$3"
-  local scenario_base="${4:-flow_fairness}"
-  local active_delay
-  active_delay="$(current_delay)"
-  local total_flows
-  total_flows="$(effective_multi_total_flows)"
   if (( total_flows < 2 )); then
-    log "Total flow_fairness count is too small; using 2."
-    total_flows=2
+    log "${scenario_base}: only one selected algorithm/flow is available; running the single participant for completeness."
   fi
-  if (( total_flows > SERVER_COUNT )); then
-    die "flow_fairness needs SERVER_COUNT>=${total_flows}; current SERVER_COUNT=${SERVER_COUNT}"
-  fi
+
   local port_base
   allocate_port_block port_base "$total_flows"
 
-  local duration
-  duration="$(duration_for_base_delay "$active_delay")"
-  local variant flow_group case_label case_tag event_file ss_file tc_file
-  variant="$(variant_for_pair "$primary_algo" "$competitor_algo")"
-  local rate_suffix=""
-  if rate_label_enabled; then
-    rate_suffix="__rate_$(safe_name "$(current_rate)")"
-  fi
-  case_label="${scenario_base}${rate_suffix}__${primary_algo}_vs_${competitor_algo}_P${total_flows}"
-  flow_group="${case_label}_r${repeat}"
-  case_tag="$(safe_name "$flow_group")"
-  event_file="${EVENTS_RAW_DIR}/${case_tag}.csv"
-  ss_file="${SS_DIR}/${case_tag}.sslog"
-  tc_file="${TC_DIR}/${case_tag}.tc"
-
-  clear_policer
-  setup_shapers "$BASE_RATE" "$active_delay" "0%"
-  event_log_init "$event_file"
-  event_log "$event_file" "multiflow_start_${primary_algo}_vs_${competitor_algo}_flows_${total_flows},${BASE_RATE},${active_delay},0%,,"
-
-  flush_tcp_metrics
-  local ss_pid
-  ss_pid="$(start_ss_logger "$ss_file" "$duration")"
-
-  local -a pids jsons stderrs algos roles rcs
-  local idx port flow_algo role tag peer
-
-  set +e
-  for ((idx=0; idx<total_flows; idx++)); do
-    port=$((port_base + idx))
-    if (( idx == 0 )); then
-      flow_algo="$primary_algo"
-      role="primary"
-    else
-      flow_algo="$competitor_algo"
-      role="competitor${idx}"
-    fi
-    tag="$(safe_name "${case_label}_${role}_${flow_algo}_r${repeat}_p${port}")"
-    jsons[$idx]="${JSON_DIR}/${tag}.json"
-    stderrs[$idx]="${STDERR_DIR}/${tag}.stderr"
-    algos[$idx]="$flow_algo"
-    roles[$idx]="$role"
-    run_iperf_capture "${jsons[$idx]}" "${stderrs[$idx]}" "$flow_algo" "$duration" 1 "$port" &
-    pids[$idx]=$!
-  done
-
-  for ((idx=0; idx<total_flows; idx++)); do
-    wait "${pids[$idx]}"
-    rcs[$idx]=$?
-  done
-  set -e
-
-  kill "$ss_pid" 2>/dev/null || true
-  wait "$ss_pid" 2>/dev/null || true
-  event_log "$event_file" "multiflow_end_${primary_algo}_vs_${competitor_algo}_flows_${total_flows},${BASE_RATE},${active_delay},0%,,"
-  capture_tc_state "$tc_file"
-
-  for ((idx=0; idx<total_flows; idx++)); do
-    if [[ "${roles[$idx]}" == "primary" ]]; then
-      peer="$competitor_algo"
-    else
-      peer="$primary_algo"
-    fi
-    append_json_results "${jsons[$idx]}" "$case_label" "${roles[$idx]}" "${algos[$idx]}" "$repeat" "$total_flows" "$duration" "${rcs[$idx]}" "${stderrs[$idx]}" \
-      "$variant" "$flow_group" "$peer" "$active_delay" "$BASE_RATE" "0%" ""
-  done
-}
-
-run_flow_fairness_impairment() {
-  local primary_algo="$1"
-  local repeat="$2"
-  local competitor_algo="$3"
-  local scenario_base="$4"
-  local impairment="$5"
-  local active_delay duration total_flows variant flow_group case_label event_file ss_file tc_file
-  active_delay="$(current_delay)"
-  duration="$(duration_for_event_delay "$active_delay")"
-  total_flows="$(effective_multi_total_flows)"
-  if (( total_flows < 2 )); then total_flows=2; fi
-  if (( total_flows > SERVER_COUNT )); then
-    die "${scenario_base} needs SERVER_COUNT>=${total_flows}; current SERVER_COUNT=${SERVER_COUNT}"
-  fi
-  local port_base
-  allocate_port_block port_base "$total_flows"
-
-  variant="$(variant_for_pair "$primary_algo" "$competitor_algo")_${impairment}"
-  local rate_suffix=""
-  if rate_label_enabled; then
-    rate_suffix="__rate_$(safe_name "$(current_rate)")"
-  fi
-  case_label="${scenario_base}${rate_suffix}__${primary_algo}_vs_${competitor_algo}_P${total_flows}"
+  local algos_label peer_label
+  algos_label="$(competition_algo_label "${compete_algos[@]}")"
+  peer_label="$(competition_peer_label "${compete_algos[@]}")"
+  variant="all_algos_${impairment}"
+  case_label="${scenario_base}__all_algos_${algos_label}_P${total_flows}"
   flow_group="${case_label}_r${repeat}"
   event_file="${EVENTS_RAW_DIR}/$(safe_name "$flow_group").csv"
   ss_file="${SS_DIR}/$(safe_name "$flow_group").sslog"
   tc_file="${TC_DIR}/$(safe_name "$flow_group").tc"
 
   local metadata_delay="$active_delay" metadata_rate="$BASE_RATE" metadata_loss="0%" metadata_policer=""
-  local changer_pid="" old_ack_rate old_ack_loss old_ack_delay old_ack_queue old_data_extra
-  old_ack_rate="$ACTIVE_ACK_RATE"; old_ack_loss="$ACTIVE_ACK_LOSS"; old_ack_delay="$ACTIVE_ACK_DELAY"; old_ack_queue="$ACTIVE_ACK_QUEUE_PROFILE"; old_data_extra="$ACTIVE_DATA_DELAY_EXTRA"
+  local changer_pid="" old_ack_rate old_ack_loss old_ack_delay old_ack_queue old_data_extra old_ack_extra old_queue_profile
+  old_ack_rate="$ACTIVE_ACK_RATE"
+  old_ack_loss="$ACTIVE_ACK_LOSS"
+  old_ack_delay="$ACTIVE_ACK_DELAY"
+  old_ack_queue="$ACTIVE_ACK_QUEUE_PROFILE"
+  old_data_extra="$ACTIVE_DATA_DELAY_EXTRA"
+  old_ack_extra="$ACTIVE_ACK_DELAY_EXTRA"
+  old_queue_profile="$ACTIVE_QUEUE_PROFILE"
 
   clear_policer
   reset_ack_impairment
@@ -2475,85 +2459,85 @@ run_flow_fairness_impairment() {
   case "$impairment" in
     clean)
       setup_shapers "$BASE_RATE" "$active_delay" "0%"
-      event_log "$event_file" "start_clean_fairness,${BASE_RATE},${active_delay},0%,,,"
+      event_log "$event_file" "all_algos_start_clean,${BASE_RATE},${active_delay},0%,,,phase=competition;algos=${algos_label};flows=${total_flows};duration=${duration}s;receiver=${COMPETITION_RECEIVER_RATE};event_at=${competition_event_at};event_hold=${competition_event_hold};drop_rate=${competition_drop_rate}"
       ;;
     sustain_loss)
       setup_sustain_loss_shapers "$BASE_RATE" "$active_delay"
       metadata_loss="$(sustain_loss_label)"
-      event_log "$event_file" "start_sustain_loss_fairness,${BASE_RATE},${active_delay},$(sustain_loss_label),,,"
+      event_log "$event_file" "all_algos_start_sustain_loss,${BASE_RATE},${active_delay},$(sustain_loss_label),,,phase=competition;algos=${algos_label};flows=${total_flows};duration=${duration}s;receiver=${COMPETITION_RECEIVER_RATE};event_at=${competition_event_at};event_hold=${competition_event_hold};drop_rate=${competition_drop_rate}"
       ;;
     loss_spike)
       setup_shapers "$BASE_RATE" "$active_delay" "0%"
       metadata_loss="dynamic:${SUDDEN_LOSS}"
-      event_log "$event_file" "start_clean_then_loss_spike,${BASE_RATE},${active_delay},0%,,,"
+      event_log "$event_file" "all_algos_start_clean_then_loss_spike,${BASE_RATE},${active_delay},0%,,,phase=competition;algos=${algos_label};flows=${total_flows};duration=${duration}s;receiver=${COMPETITION_RECEIVER_RATE};event_at=${competition_event_at};event_hold=${competition_event_hold};drop_rate=${competition_drop_rate}"
       (
-        sleep "$EVENT_AT"
+        sleep "$competition_event_at"
         change_shapers "$BASE_RATE" "$active_delay" "$SUDDEN_LOSS"
-        event_log "$event_file" "loss_spike,${BASE_RATE},${active_delay},${SUDDEN_LOSS},,,"
-        sleep "$EVENT_HOLD"
+        event_log "$event_file" "loss_spike,${BASE_RATE},${active_delay},${SUDDEN_LOSS},,,phase=loss_spike"
+        sleep "$competition_event_hold"
         change_shapers "$BASE_RATE" "$active_delay" "0%"
-        event_log "$event_file" "loss_recovery,${BASE_RATE},${active_delay},0%,,,"
+        event_log "$event_file" "loss_recovery,${BASE_RATE},${active_delay},0%,,,phase=loss_recovery"
       ) & changer_pid=$!
       ;;
     latency_spike)
       setup_shapers "$BASE_RATE" "$active_delay" "0%"
       metadata_delay="dynamic:${active_delay}->${HIGH_DELAY}->${active_delay}"
-      event_log "$event_file" "start_clean_then_latency_spike,${BASE_RATE},${active_delay},0%,,,"
+      event_log "$event_file" "all_algos_start_clean_then_latency_spike,${BASE_RATE},${active_delay},0%,,,phase=competition;algos=${algos_label};flows=${total_flows};duration=${duration}s;receiver=${COMPETITION_RECEIVER_RATE};event_at=${competition_event_at};event_hold=${competition_event_hold};drop_rate=${competition_drop_rate}"
       (
-        sleep "$EVENT_AT"
+        sleep "$competition_event_at"
         change_shapers "$BASE_RATE" "$HIGH_DELAY" "0%"
-        event_log "$event_file" "latency_spike,${BASE_RATE},${HIGH_DELAY},0%,,,"
-        sleep "$EVENT_HOLD"
+        event_log "$event_file" "latency_spike,${BASE_RATE},${HIGH_DELAY},0%,,,phase=latency_spike"
+        sleep "$competition_event_hold"
         change_shapers "$BASE_RATE" "$active_delay" "0%"
-        event_log "$event_file" "latency_recovery,${BASE_RATE},${active_delay},0%,,,"
+        event_log "$event_file" "latency_recovery,${BASE_RATE},${active_delay},0%,,,phase=latency_recovery"
       ) & changer_pid=$!
       ;;
     capacity_drop)
       setup_shapers "$BASE_RATE" "$active_delay" "0%"
-      metadata_rate="dynamic:${BASE_RATE}->${DROP_RATE}->${BASE_RATE}"
-      event_log "$event_file" "start_clean_then_capacity_drop,${BASE_RATE},${active_delay},0%,,,"
+      metadata_rate="dynamic:${BASE_RATE}->${competition_drop_rate}->${BASE_RATE}"
+      event_log "$event_file" "all_algos_start_clean_then_capacity_drop,${BASE_RATE},${active_delay},0%,,,phase=competition;algos=${algos_label};flows=${total_flows};duration=${duration}s;receiver=${COMPETITION_RECEIVER_RATE};event_at=${competition_event_at};event_hold=${competition_event_hold};drop_rate=${competition_drop_rate}"
       (
-        sleep "$EVENT_AT"
-        change_shapers "$DROP_RATE" "$active_delay" "0%"
-        event_log "$event_file" "capacity_drop,${DROP_RATE},${active_delay},0%,,,"
-        sleep "$EVENT_HOLD"
+        sleep "$competition_event_at"
+        change_shapers "$competition_drop_rate" "$active_delay" "0%"
+        event_log "$event_file" "capacity_drop,${competition_drop_rate},${active_delay},0%,,,phase=capacity_drop"
+        sleep "$competition_event_hold"
         change_shapers "$BASE_RATE" "$active_delay" "0%"
-        event_log "$event_file" "capacity_recovery,${BASE_RATE},${active_delay},0%,,,"
+        event_log "$event_file" "capacity_recovery,${BASE_RATE},${active_delay},0%,,,phase=capacity_recovery"
       ) & changer_pid=$!
       ;;
     policer)
       setup_shapers "$BASE_RATE" "$active_delay" "0%"
       metadata_policer="dynamic:${POLICE_RATE}"
-      event_log "$event_file" "start_clean_then_policer,${BASE_RATE},${active_delay},0%,,,"
+      event_log "$event_file" "all_algos_start_clean_then_policer,${BASE_RATE},${active_delay},0%,,,phase=competition;algos=${algos_label};flows=${total_flows};duration=${duration}s;receiver=${COMPETITION_RECEIVER_RATE};event_at=${competition_event_at};event_hold=${competition_event_hold};drop_rate=${competition_drop_rate}"
       (
-        sleep "$EVENT_AT"
+        sleep "$competition_event_at"
         enable_ingress_policer "$POLICE_RATE" "$POLICE_BURST" "$POLICE_MTU" "$POLICE_MATCH_DST"
-        event_log "$event_file" "policer_enable,${BASE_RATE},${active_delay},0%,${POLICE_RATE},${POLICE_BURST},"
-        sleep "$EVENT_HOLD"
+        event_log "$event_file" "policer_enable,${BASE_RATE},${active_delay},0%,${POLICE_RATE},${POLICE_BURST},phase=policer"
+        sleep "$competition_event_hold"
         clear_policer
-        event_log "$event_file" "policer_disable,${BASE_RATE},${active_delay},0%,,,"
+        event_log "$event_file" "policer_disable,${BASE_RATE},${active_delay},0%,,,phase=policer_recovery"
       ) & changer_pid=$!
       ;;
     ack_limit)
       set_ack_impairment "$ACK_LIMIT_RATE" "" "0%" "$QUEUE_PROFILE"
       setup_shapers "$BASE_RATE" "$active_delay" "0%"
       metadata_policer="ack_rate:${ACK_LIMIT_RATE}"
-      event_log "$event_file" "ack_rate_limited_fairness,${BASE_RATE},${active_delay},0%,,,ack_rate=${ACK_LIMIT_RATE}"
+      event_log "$event_file" "all_algos_ack_rate_limited,${BASE_RATE},${active_delay},0%,,,phase=ack_limit;ack_rate=${ACK_LIMIT_RATE};algos=${algos_label};flows=${total_flows};duration=${duration}s;receiver=${COMPETITION_RECEIVER_RATE};event_at=${competition_event_at};event_hold=${competition_event_hold};drop_rate=${competition_drop_rate}"
       ;;
     jitter)
       set_data_delay_extra "80ms 75% distribution paretonormal"
       setup_shapers "$BASE_RATE" "$active_delay" "0%"
       metadata_delay="${active_delay}+jitter:80ms_75%_paretonormal"
-      event_log "$event_file" "jitter_fairness,${BASE_RATE},${active_delay},0%,,,jitter=80ms_75%_paretonormal"
+      event_log "$event_file" "all_algos_jitter,${BASE_RATE},${active_delay},0%,,,phase=jitter;jitter=80ms_75%_paretonormal;algos=${algos_label};flows=${total_flows};duration=${duration}s;receiver=${COMPETITION_RECEIVER_RATE};event_at=${competition_event_at};event_hold=${competition_event_hold};drop_rate=${competition_drop_rate}"
       ;;
     reorder)
       local fairness_reorder_spec="reorder 1% 25%"
       setup_shapers "$BASE_RATE" "$active_delay" "$fairness_reorder_spec"
       metadata_loss="$fairness_reorder_spec"
-      event_log "$event_file" "reorder_fairness,${BASE_RATE},${active_delay},${fairness_reorder_spec},,,"
+      event_log "$event_file" "all_algos_reorder,${BASE_RATE},${active_delay},${fairness_reorder_spec},,,phase=reorder;algos=${algos_label};flows=${total_flows};duration=${duration}s;receiver=${COMPETITION_RECEIVER_RATE};event_at=${competition_event_at};event_hold=${competition_event_hold};drop_rate=${competition_drop_rate}"
       ;;
     *)
-      die "Unknown flow fairness impairment: ${impairment}"
+      die "Unknown all-algorithm fairness impairment: ${impairment}"
       ;;
   esac
 
@@ -2562,40 +2546,56 @@ run_flow_fairness_impairment() {
   ss_pid="$(start_ss_logger "$ss_file" "$duration")"
 
   local -a pids jsons stderrs algos roles rcs
-  local idx port flow_algo role tag peer
+  local idx=0 algo_idx flow_copy port flow_algo role tag peer
   set +e
-  for ((idx=0; idx<total_flows; idx++)); do
-    port=$((port_base + idx))
-    if (( idx == 0 )); then
-      flow_algo="$primary_algo"; role="primary"
-    else
-      flow_algo="$competitor_algo"; role="competitor${idx}"
-    fi
-    tag="$(safe_name "${case_label}_${role}_${flow_algo}_r${repeat}_p${port}")"
-    jsons[$idx]="${JSON_DIR}/${tag}.json"
-    stderrs[$idx]="${STDERR_DIR}/${tag}.stderr"
-    algos[$idx]="$flow_algo"
-    roles[$idx]="$role"
-    run_iperf_capture "${jsons[$idx]}" "${stderrs[$idx]}" "$flow_algo" "$duration" 1 "$port" &
-    pids[$idx]=$!
+  for algo_idx in "${!compete_algos[@]}"; do
+    flow_algo="${compete_algos[$algo_idx]}"
+    for ((flow_copy=1; flow_copy<=flows_per_algo; flow_copy++)); do
+      port=$((port_base + idx))
+      if (( idx == 0 )); then
+        role="primary"
+      else
+        role="competitor${idx}"
+      fi
+      if (( flows_per_algo > 1 )); then
+        role="${role}_flow${flow_copy}"
+      fi
+      tag="$(safe_name "${case_label}_${role}_${flow_algo}_r${repeat}_p${port}")"
+      jsons[$idx]="${JSON_DIR}/${tag}.json"
+      stderrs[$idx]="${STDERR_DIR}/${tag}.stderr"
+      algos[$idx]="$flow_algo"
+      roles[$idx]="$role"
+      run_iperf_capture "${jsons[$idx]}" "${stderrs[$idx]}" "$flow_algo" "$duration" 1 "$port" upload &
+      pids[$idx]=$!
+      idx=$((idx + 1))
+    done
   done
+
   for ((idx=0; idx<total_flows; idx++)); do
-    wait "${pids[$idx]}"; rcs[$idx]=$?
+    wait "${pids[$idx]}"
+    rcs[$idx]=$?
   done
   set -e
 
   [[ -n "$changer_pid" ]] && wait "$changer_pid" 2>/dev/null || true
   kill "$ss_pid" 2>/dev/null || true
   wait "$ss_pid" 2>/dev/null || true
+  event_log "$event_file" "all_algos_competition_end,${BASE_RATE},${active_delay},${metadata_loss},${metadata_policer},,phase=end;algos=${algos_label};flows=${total_flows};duration=${duration}s;receiver=${COMPETITION_RECEIVER_RATE};event_at=${competition_event_at};event_hold=${competition_event_hold};drop_rate=${competition_drop_rate}"
   capture_tc_state "$tc_file"
 
   for ((idx=0; idx<total_flows; idx++)); do
-    if [[ "${roles[$idx]}" == "primary" ]]; then peer="$competitor_algo"; else peer="$primary_algo"; fi
+    peer="$peer_label"
     append_json_results "${jsons[$idx]}" "$case_label" "${roles[$idx]}" "${algos[$idx]}" "$repeat" "$total_flows" "$duration" "${rcs[$idx]}" "${stderrs[$idx]}" \
-      "$variant" "$flow_group" "$peer" "$metadata_delay" "$metadata_rate" "$metadata_loss" "$metadata_policer" "0"
+      "$variant" "$flow_group" "$peer" "$metadata_delay" "$metadata_rate" "$metadata_loss" "$metadata_policer" "0" "$ss_file" "$tc_file"
   done
 
-  ACTIVE_ACK_RATE="$old_ack_rate"; ACTIVE_ACK_LOSS="$old_ack_loss"; ACTIVE_ACK_DELAY="$old_ack_delay"; ACTIVE_ACK_QUEUE_PROFILE="$old_ack_queue"; ACTIVE_DATA_DELAY_EXTRA="$old_data_extra"
+  ACTIVE_ACK_RATE="$old_ack_rate"
+  ACTIVE_ACK_LOSS="$old_ack_loss"
+  ACTIVE_ACK_DELAY="$old_ack_delay"
+  ACTIVE_ACK_QUEUE_PROFILE="$old_ack_queue"
+  ACTIVE_DATA_DELAY_EXTRA="$old_data_extra"
+  ACTIVE_ACK_DELAY_EXTRA="$old_ack_extra"
+  ACTIVE_QUEUE_PROFILE="$old_queue_profile"
   reset_ack_impairment
   reset_data_delay_extra
   clear_policer
@@ -2605,7 +2605,6 @@ run_flow_fairness_impairment() {
     sleep "$POST_IMPAIRMENT_SETTLE"
   fi
 }
-
 
 run_combined_all_test() {
   local scenario_base="combined_all"
@@ -2828,16 +2827,16 @@ run_combined_all_test() {
   roles[$idx]="competitor_new"
   durations[$idx]="$remaining"
   start_offsets[$idx]="$t"
-  event_log "$event_file" "flow_join_start_${competitor_algo},${DROP_RATE},${current_delay},$(sustain_loss_label),${POLICE_RATE},${POLICE_BURST},phase=flow_join"
+  event_log "$event_file" "competition_new_flow_start_${competitor_algo},${DROP_RATE},${current_delay},$(sustain_loss_label),${POLICE_RATE},${POLICE_BURST},phase=competition_new_flow"
   set +e
   run_iperf_capture "${jsons[$idx]}" "${stderrs[$idx]}" "$competitor_algo" "$remaining" 1 "$port" &
   pids[$idx]=$!
   set -e
   sleep "$phase"; t=$((t + phase))
 
-  # 10) Multi-flow/churn-like phase: add the rest of the competitor flows.
+  # 10) Multi-flow phase: add the rest of the competitor flows.
   if (( total_flows > 2 )); then
-    event_log "$event_file" "flow_fairness_competitors_start_${competitor_algo}_additional_$((total_flows - 2)),${DROP_RATE},${current_delay},$(sustain_loss_label),${POLICE_RATE},${POLICE_BURST},phase=flow_fairness_churn"
+    event_log "$event_file" "flow_fairness_competitors_start_${competitor_algo}_additional_$((total_flows - 2)),${DROP_RATE},${current_delay},$(sustain_loss_label),${POLICE_RATE},${POLICE_BURST},phase=flow_fairness_parallel_extra"
     set +e
     for ((idx=2; idx<total_flows; idx++)); do
       remaining=$((duration - t))
@@ -2855,7 +2854,7 @@ run_combined_all_test() {
     done
     set -e
   else
-    event_log "$event_file" "flow_fairness_phase_no_extra_competitors,${DROP_RATE},${current_delay},$(sustain_loss_label),${POLICE_RATE},${POLICE_BURST},phase=flow_fairness_churn"
+    event_log "$event_file" "flow_fairness_phase_no_extra_competitors,${DROP_RATE},${current_delay},$(sustain_loss_label),${POLICE_RATE},${POLICE_BURST},phase=flow_fairness_parallel_extra"
   fi
   sleep "$phase"; t=$((t + phase))
 
@@ -3211,7 +3210,7 @@ run_with_loss_bursts() {
   active_delay="$(current_delay)"
   local duration
   duration="$(duration_for_event_delay "$active_delay")"
-  local required_duration=$((BURST_START + BURST_COUNT * (BURST_ON_SECONDS + BURST_OFF_SECONDS) + FLOW_JOIN_POST))
+  local required_duration=$((BURST_START + BURST_COUNT * (BURST_ON_SECONDS + BURST_OFF_SECONDS) + EVENT_RECOVERY_POST))
   if (( duration < required_duration )); then
     duration="$required_duration"
   fi
@@ -3413,195 +3412,257 @@ run_short_flow_under_load() {
 }
 
 
-run_flow_churn_test() {
-  local scenario="$1" primary_algo="$2" repeat="$3" competitor_algo="$4"
-  local active_delay duration total_needed variant case_label flow_group event_file ss_file tc_file
-  active_delay="$(current_delay)"
-  duration="$CHURN_DURATION"
-  total_needed=$((CHURN_COMPETITOR_COUNT + 1))
-  if (( total_needed > SERVER_COUNT )); then
-    die "flow_churn needs SERVER_COUNT>=${total_needed}; current SERVER_COUNT=${SERVER_COUNT}"
+
+proxy_china_bool_enabled() {
+  case "${1:-0}" in
+    1|yes|true|on|enable|enabled) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+proxy_china_is_mobile_profile() {
+  case "$1" in
+    mobile_typical|mobile_poor) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+proxy_china_degraded_profile_for() {
+  case "$1" in
+    mobile_typical) printf '%s\n' mobile_poor ;;
+    lan_typical) printf '%s\n' lan_poor ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+proxy_china_profile_params() {
+  local profile="$1"
+  case "$profile" in
+    mobile_typical)
+      PROXY_CHINA_DOWN_RATE="$PROXY_CHINA_MOBILE_TYPICAL_DOWN_RATE"
+      PROXY_CHINA_UP_RATE="$PROXY_CHINA_MOBILE_TYPICAL_UP_RATE"
+      PROXY_CHINA_DOWN_DELAY="$PROXY_CHINA_MOBILE_TYPICAL_DOWN_DELAY"
+      PROXY_CHINA_UP_DELAY="$PROXY_CHINA_MOBILE_TYPICAL_UP_DELAY"
+      PROXY_CHINA_DOWN_JITTER="$PROXY_CHINA_MOBILE_TYPICAL_DOWN_JITTER"
+      PROXY_CHINA_UP_JITTER="$PROXY_CHINA_MOBILE_TYPICAL_UP_JITTER"
+      PROXY_CHINA_DOWN_LOSS="$PROXY_CHINA_MOBILE_TYPICAL_DOWN_LOSS"
+      PROXY_CHINA_UP_LOSS="$PROXY_CHINA_MOBILE_TYPICAL_UP_LOSS"
+      PROXY_CHINA_DIST="$PROXY_CHINA_MOBILE_TYPICAL_DIST"
+      PROXY_CHINA_JITTER_CORR="$PROXY_CHINA_MOBILE_TYPICAL_JITTER_CORR"
+      PROXY_CHINA_LOSS_CORR="$PROXY_CHINA_MOBILE_TYPICAL_LOSS_CORR"
+      PROXY_CHINA_LIMIT="$PROXY_CHINA_MOBILE_TYPICAL_LIMIT"
+      PROXY_CHINA_SLOT_ARGS="$PROXY_CHINA_MOBILE_TYPICAL_SLOT_ARGS"
+      ;;
+    mobile_poor)
+      PROXY_CHINA_DOWN_RATE="$PROXY_CHINA_MOBILE_POOR_DOWN_RATE"
+      PROXY_CHINA_UP_RATE="$PROXY_CHINA_MOBILE_POOR_UP_RATE"
+      PROXY_CHINA_DOWN_DELAY="$PROXY_CHINA_MOBILE_POOR_DOWN_DELAY"
+      PROXY_CHINA_UP_DELAY="$PROXY_CHINA_MOBILE_POOR_UP_DELAY"
+      PROXY_CHINA_DOWN_JITTER="$PROXY_CHINA_MOBILE_POOR_DOWN_JITTER"
+      PROXY_CHINA_UP_JITTER="$PROXY_CHINA_MOBILE_POOR_UP_JITTER"
+      PROXY_CHINA_DOWN_LOSS="$PROXY_CHINA_MOBILE_POOR_DOWN_LOSS"
+      PROXY_CHINA_UP_LOSS="$PROXY_CHINA_MOBILE_POOR_UP_LOSS"
+      PROXY_CHINA_DIST="$PROXY_CHINA_MOBILE_POOR_DIST"
+      PROXY_CHINA_JITTER_CORR="$PROXY_CHINA_MOBILE_POOR_JITTER_CORR"
+      PROXY_CHINA_LOSS_CORR="$PROXY_CHINA_MOBILE_POOR_LOSS_CORR"
+      PROXY_CHINA_LIMIT="$PROXY_CHINA_MOBILE_POOR_LIMIT"
+      PROXY_CHINA_SLOT_ARGS="$PROXY_CHINA_MOBILE_POOR_SLOT_ARGS"
+      ;;
+    lan_typical)
+      PROXY_CHINA_DOWN_RATE="$PROXY_CHINA_LAN_TYPICAL_DOWN_RATE"
+      PROXY_CHINA_UP_RATE="$PROXY_CHINA_LAN_TYPICAL_UP_RATE"
+      PROXY_CHINA_DOWN_DELAY="$PROXY_CHINA_LAN_TYPICAL_DOWN_DELAY"
+      PROXY_CHINA_UP_DELAY="$PROXY_CHINA_LAN_TYPICAL_UP_DELAY"
+      PROXY_CHINA_DOWN_JITTER="$PROXY_CHINA_LAN_TYPICAL_DOWN_JITTER"
+      PROXY_CHINA_UP_JITTER="$PROXY_CHINA_LAN_TYPICAL_UP_JITTER"
+      PROXY_CHINA_DOWN_LOSS="$PROXY_CHINA_LAN_TYPICAL_DOWN_LOSS"
+      PROXY_CHINA_UP_LOSS="$PROXY_CHINA_LAN_TYPICAL_UP_LOSS"
+      PROXY_CHINA_DIST="$PROXY_CHINA_LAN_TYPICAL_DIST"
+      PROXY_CHINA_JITTER_CORR="$PROXY_CHINA_LAN_TYPICAL_JITTER_CORR"
+      PROXY_CHINA_LOSS_CORR="$PROXY_CHINA_LAN_TYPICAL_LOSS_CORR"
+      PROXY_CHINA_LIMIT="$PROXY_CHINA_LAN_TYPICAL_LIMIT"
+      PROXY_CHINA_SLOT_ARGS="$PROXY_CHINA_LAN_TYPICAL_SLOT_ARGS"
+      ;;
+    lan_poor)
+      PROXY_CHINA_DOWN_RATE="$PROXY_CHINA_LAN_POOR_DOWN_RATE"
+      PROXY_CHINA_UP_RATE="$PROXY_CHINA_LAN_POOR_UP_RATE"
+      PROXY_CHINA_DOWN_DELAY="$PROXY_CHINA_LAN_POOR_DOWN_DELAY"
+      PROXY_CHINA_UP_DELAY="$PROXY_CHINA_LAN_POOR_UP_DELAY"
+      PROXY_CHINA_DOWN_JITTER="$PROXY_CHINA_LAN_POOR_DOWN_JITTER"
+      PROXY_CHINA_UP_JITTER="$PROXY_CHINA_LAN_POOR_UP_JITTER"
+      PROXY_CHINA_DOWN_LOSS="$PROXY_CHINA_LAN_POOR_DOWN_LOSS"
+      PROXY_CHINA_UP_LOSS="$PROXY_CHINA_LAN_POOR_UP_LOSS"
+      PROXY_CHINA_DIST="$PROXY_CHINA_LAN_POOR_DIST"
+      PROXY_CHINA_JITTER_CORR="$PROXY_CHINA_LAN_POOR_JITTER_CORR"
+      PROXY_CHINA_LOSS_CORR="$PROXY_CHINA_LAN_POOR_LOSS_CORR"
+      PROXY_CHINA_LIMIT="$PROXY_CHINA_LAN_POOR_LIMIT"
+      PROXY_CHINA_SLOT_ARGS="$PROXY_CHINA_LAN_POOR_SLOT_ARGS"
+      ;;
+    *) die "Unknown PROXY_CHINA profile: ${profile}. Use mobile_typical, mobile_poor, lan_typical, lan_poor." ;;
+  esac
+}
+
+proxy_china_extra_args() {
+  local jitter="$1" corr="$2" dist="$3" slot_args="$4" out=""
+  if [[ -n "$jitter" && "$jitter" != "0" && "$jitter" != "0ms" ]]; then
+    out="$jitter $corr distribution $dist"
   fi
-  local port_base
-  allocate_port_block port_base "$total_needed"
-  variant="$(variant_for_pair "$primary_algo" "$competitor_algo")"
-  case_label="${scenario}__${primary_algo}_vs_${competitor_algo}_churn${CHURN_COMPETITOR_COUNT}"
-  flow_group="${case_label}_r${repeat}"
-  event_file="${EVENTS_RAW_DIR}/$(safe_name "$flow_group").csv"
-  ss_file="${SS_DIR}/$(safe_name "$flow_group").sslog"
-  tc_file="${TC_DIR}/$(safe_name "$flow_group").tc"
-  event_log_init "$event_file"
-  reset_ack_impairment
-  set_active_queue_profile "$QUEUE_PROFILE"
-  clear_policer
-  setup_shapers "$BASE_RATE" "$active_delay" "0%"
-  flush_tcp_metrics
-  local ss_pid
-  ss_pid="$(start_ss_logger "$ss_file" "$duration")"
-
-  local -a pids jsons stderrs roles algos offsets durations rcs
-  local idx port tag comp_duration
-  idx=0
-  port="$port_base"
-  tag="$(safe_name "${flow_group}_primary_${primary_algo}_p${port}")"
-  jsons[$idx]="${JSON_DIR}/${tag}.json"; stderrs[$idx]="${STDERR_DIR}/${tag}.stderr"; roles[$idx]="primary"; algos[$idx]="$primary_algo"; offsets[$idx]=0; durations[$idx]="$duration"
-  set +e
-  run_iperf_capture "${jsons[$idx]}" "${stderrs[$idx]}" "$primary_algo" "$duration" 1 "$port" upload & pids[$idx]=$!
-  set -e
-  event_log "$event_file" "flow_churn_primary_start,${BASE_RATE},${active_delay},0%,,,"
-
-  for ((idx=1; idx<=CHURN_COMPETITOR_COUNT; idx++)); do
-    sleep "$CHURN_INTERVAL"
-    port=$((port_base + idx))
-    comp_duration="$CHURN_FLOW_DURATION"
-    tag="$(safe_name "${flow_group}_competitor${idx}_${competitor_algo}_p${port}")"
-    jsons[$idx]="${JSON_DIR}/${tag}.json"; stderrs[$idx]="${STDERR_DIR}/${tag}.stderr"; roles[$idx]="competitor${idx}"; algos[$idx]="$competitor_algo"; offsets[$idx]=$((idx * CHURN_INTERVAL)); durations[$idx]="$comp_duration"
-    event_log "$event_file" "flow_churn_competitor${idx}_start_${competitor_algo},${BASE_RATE},${active_delay},0%,,,"
-    set +e
-    run_iperf_capture "${jsons[$idx]}" "${stderrs[$idx]}" "$competitor_algo" "$comp_duration" 1 "$port" upload & pids[$idx]=$!
-    set -e
-  done
-
-  set +e
-  for idx in "${!pids[@]}"; do
-    wait "${pids[$idx]}"
-    rcs[$idx]=$?
-  done
-  set -e
-  kill "$ss_pid" 2>/dev/null || true
-  wait "$ss_pid" 2>/dev/null || true
-  capture_tc_state "$tc_file"
-  for idx in "${!jsons[@]}"; do
-    local peer
-    if [[ "${roles[$idx]}" == "primary" ]]; then peer="$competitor_algo"; else peer="$primary_algo"; fi
-    append_json_results "${jsons[$idx]}" "$case_label" "${roles[$idx]}" "${algos[$idx]}" "$repeat" 1 "${durations[$idx]}" "${rcs[$idx]:-1}" "${stderrs[$idx]}" \
-      "$variant" "$flow_group" "$peer" "$active_delay" "$BASE_RATE" "0%" "" "${offsets[$idx]}"
-  done
+  if [[ -n "$slot_args" ]]; then
+    out="${out:+$out }$slot_args"
+  fi
+  printf '%s\n' "$out"
 }
 
-run_profile_seedbox_torrent_upload() {
-  local scenario="$1" primary_algo="$2" repeat="$3" competitor_algo="$4"
-  local save_rate save_active save_delay save_ack save_queue save_ack_queue save_multi save_base_duration
-  save_rate="$BASE_RATE"
-  save_active="$ACTIVE_BASE_RATE"
-  save_delay="$ACTIVE_ONEWAY_DELAY"
-  save_ack="$ACTIVE_ACK_RATE"
-  save_queue="$ACTIVE_QUEUE_PROFILE"
-  save_ack_queue="$ACTIVE_ACK_QUEUE_PROFILE"
-  save_multi="$MULTI_COMPETITOR_FLOWS"
-  save_base_duration="$BASE_DURATION"
-
-  set_active_rate "$SEEDBOX_UPLINK_RATE"
-  set_active_latency "$SEEDBOX_BASE_DELAY"
-  ACTIVE_ACK_RATE="$SEEDBOX_ACK_RATE"
-  ACTIVE_QUEUE_PROFILE="$SEEDBOX_QUEUE_PROFILE"
-  ACTIVE_ACK_QUEUE_PROFILE="$SEEDBOX_QUEUE_PROFILE"
-  MULTI_COMPETITOR_FLOWS="$SEEDBOX_COMPETITOR_FLOWS"
-  BASE_DURATION="$SEEDBOX_DURATION"
-
-  run_multiflow_competition "$primary_algo" "$repeat" "$competitor_algo" "$scenario"
-
-  BASE_RATE="$save_rate"
-  ACTIVE_BASE_RATE="$save_active"
-  ACTIVE_ONEWAY_DELAY="$save_delay"
-  ACTIVE_ACK_RATE="$save_ack"
-  ACTIVE_QUEUE_PROFILE="$save_queue"
-  ACTIVE_ACK_QUEUE_PROFILE="$save_ack_queue"
-  MULTI_COMPETITOR_FLOWS="$save_multi"
-  BASE_DURATION="$save_base_duration"
-  clear_policer
-}
-
-run_profile_proxy_mobile_china() {
-  local scenario="$1" algo="$2" repeat="$3"
-  local save_rate save_active save_delay save_ack save_ack_delay save_ack_loss save_queue save_ack_queue save_data_extra save_ack_extra
-  save_rate="$BASE_RATE"
-  save_active="$ACTIVE_BASE_RATE"
-  save_delay="$ACTIVE_ONEWAY_DELAY"
-  save_ack="$ACTIVE_ACK_RATE"
-  save_ack_delay="$ACTIVE_ACK_DELAY"
-  save_ack_loss="$ACTIVE_ACK_LOSS"
-  save_queue="$ACTIVE_QUEUE_PROFILE"
-  save_ack_queue="$ACTIVE_ACK_QUEUE_PROFILE"
-  save_data_extra="$ACTIVE_DATA_DELAY_EXTRA"
-  save_ack_extra="$ACTIVE_ACK_DELAY_EXTRA"
-
-  is_positive_integer "$PROXY_MOBILE_PHASE_SECONDS" || die "PROXY_MOBILE_PHASE_SECONDS must be a positive integer"
-  local phase="$PROXY_MOBILE_PHASE_SECONDS"
-  local minimum_duration=$((phase * 6))
-  local duration
-  if [[ "$PROXY_MOBILE_DURATION" == "0" || "$PROXY_MOBILE_DURATION" == "auto" ]]; then
-    duration="$minimum_duration"
+proxy_china_loss_spec() {
+  local loss="$1" corr="$2"
+  if [[ -z "$loss" || "$loss" == "0" || "$loss" == "0%" || "$loss" == "none" ]]; then
+    printf '%s\n' "loss random 0%"
   else
-    is_positive_integer "$PROXY_MOBILE_DURATION" || die "PROXY_MOBILE_DURATION must be 0, auto, or a positive integer"
-    duration="$PROXY_MOBILE_DURATION"
-    if (( duration < minimum_duration )); then
-      log "PROXY_MOBILE_DURATION=${duration}s is shorter than the proxy-mobile schedule; using ${minimum_duration}s."
-      duration="$minimum_duration"
+    printf '%s\n' "loss random $loss $corr"
+  fi
+}
+
+proxy_china_apply_profile() {
+  local profile="$1" op="${2:-change}"
+  local up_loss down_loss
+  proxy_china_profile_params "$profile"
+  QUEUE_MODE="static"
+  QUEUE_PACKETS="$PROXY_CHINA_LIMIT"
+  QUEUE_ACK_PACKETS="$PROXY_CHINA_LIMIT"
+  set_active_rate "$PROXY_CHINA_UP_RATE"
+  set_active_latency "$PROXY_CHINA_UP_DELAY"
+  set_active_queue_profile "$PROXY_CHINA_QUEUE_PROFILE"
+  ACTIVE_ACK_QUEUE_PROFILE="$PROXY_CHINA_QUEUE_PROFILE"
+  ACTIVE_DATA_DELAY_EXTRA="$(proxy_china_extra_args "$PROXY_CHINA_UP_JITTER" "$PROXY_CHINA_JITTER_CORR" "$PROXY_CHINA_DIST" "$PROXY_CHINA_SLOT_ARGS")"
+  ACTIVE_ACK_DELAY_EXTRA="$(proxy_china_extra_args "$PROXY_CHINA_DOWN_JITTER" "$PROXY_CHINA_JITTER_CORR" "$PROXY_CHINA_DIST" "$PROXY_CHINA_SLOT_ARGS")"
+  up_loss="$(proxy_china_loss_spec "$PROXY_CHINA_UP_LOSS" "$PROXY_CHINA_LOSS_CORR")"
+  down_loss="$(proxy_china_loss_spec "$PROXY_CHINA_DOWN_LOSS" "$PROXY_CHINA_LOSS_CORR")"
+  set_ack_impairment "$PROXY_CHINA_DOWN_RATE" "$PROXY_CHINA_DOWN_DELAY" "$down_loss" "$PROXY_CHINA_QUEUE_PROFILE"
+  case "$op" in
+    setup) setup_shapers "$PROXY_CHINA_UP_RATE" "$PROXY_CHINA_UP_DELAY" "$up_loss" ;;
+    change) change_shapers "$PROXY_CHINA_UP_RATE" "$PROXY_CHINA_UP_DELAY" "$up_loss" ;;
+    *) die "Unknown proxy_china_apply_profile op: $op" ;;
+  esac
+}
+
+proxy_china_apply_stall() {
+  local profile="$1" target="$2"
+  local up_loss down_loss stall_up_loss stall_down_loss
+  proxy_china_profile_params "$profile"
+  up_loss="$(proxy_china_loss_spec "$PROXY_CHINA_UP_LOSS" "$PROXY_CHINA_LOSS_CORR")"
+  down_loss="$(proxy_china_loss_spec "$PROXY_CHINA_DOWN_LOSS" "$PROXY_CHINA_LOSS_CORR")"
+  stall_up_loss="$up_loss"
+  stall_down_loss="$down_loss"
+  case "$target" in
+    client_bound|down|download) stall_down_loss="loss random 100%" ;;
+    proxy_bound|up|upload) stall_up_loss="loss random 100%" ;;
+    both) stall_up_loss="loss random 100%"; stall_down_loss="loss random 100%" ;;
+    *) die "Unknown PROXY_CHINA_STALL_TARGET=${target}. Use client_bound, proxy_bound, or both." ;;
+  esac
+  QUEUE_MODE="static"
+  QUEUE_PACKETS="$PROXY_CHINA_LIMIT"
+  QUEUE_ACK_PACKETS="$PROXY_CHINA_LIMIT"
+  set_active_rate "$PROXY_CHINA_UP_RATE"
+  set_active_latency "$PROXY_CHINA_UP_DELAY"
+  set_active_queue_profile "$PROXY_CHINA_QUEUE_PROFILE"
+  ACTIVE_ACK_QUEUE_PROFILE="$PROXY_CHINA_QUEUE_PROFILE"
+  ACTIVE_DATA_DELAY_EXTRA="$(proxy_china_extra_args "$PROXY_CHINA_UP_JITTER" "$PROXY_CHINA_JITTER_CORR" "$PROXY_CHINA_DIST" "$PROXY_CHINA_SLOT_ARGS")"
+  ACTIVE_ACK_DELAY_EXTRA="$(proxy_china_extra_args "$PROXY_CHINA_DOWN_JITTER" "$PROXY_CHINA_JITTER_CORR" "$PROXY_CHINA_DIST" "$PROXY_CHINA_SLOT_ARGS")"
+  set_ack_impairment "$PROXY_CHINA_DOWN_RATE" "$PROXY_CHINA_DOWN_DELAY" "$stall_down_loss" "$PROXY_CHINA_QUEUE_PROFILE"
+  change_shapers "$PROXY_CHINA_UP_RATE" "$PROXY_CHINA_UP_DELAY" "$stall_up_loss"
+}
+
+proxy_china_case_duration() {
+  local profile="$1" phase="$2" count=2
+  if proxy_china_bool_enabled "$PROXY_CHINA_ENABLE_PROFILE_SWING"; then
+    count=$((count + 1))
+  fi
+  if proxy_china_is_mobile_profile "$profile" && proxy_china_bool_enabled "$PROXY_CHINA_ENABLE_STALLS" && (( PROXY_CHINA_STALL_SECONDS > 0 )); then
+    count=$((count + 1))
+  fi
+  printf '%s\n' "$((phase * count))"
+}
+
+run_profile_proxy_mobile_china_case() {
+  local scenario="$1" algo="$2" repeat="$3" profile="$4" direction="$5" parallel="$6"
+  local phase="$PROXY_CHINA_PHASE_SECONDS"
+  local min_duration duration degraded active_profile mode role case_label flow_group case_tag event_file ss_file tc_file tag json_file stderr_file port pid ss_pid rc t remaining stall_remainder data_rate_label data_delay_label loss_label
+
+  min_duration="$(proxy_china_case_duration "$profile" "$phase")"
+  if [[ "$PROXY_CHINA_DURATION" == "0" || "$PROXY_CHINA_DURATION" == "auto" ]]; then
+    duration="$min_duration"
+  else
+    is_positive_integer "$PROXY_CHINA_DURATION" || die "PROXY_CHINA_DURATION must be 0, auto, or a positive integer"
+    duration="$PROXY_CHINA_DURATION"
+    if (( duration < min_duration )); then
+      log "PROXY_CHINA_DURATION=${duration}s is shorter than the ${profile}/${direction} schedule; using ${min_duration}s."
+      duration="$min_duration"
     fi
   fi
 
-  set_active_rate "$PROXY_BACKHAUL_RATE"
-  set_active_latency "$PROXY_MOBILE_BASE_DELAY"
-  reset_data_delay_extra
-  clear_policer
-  ACTIVE_QUEUE_PROFILE="$QUEUE_PROFILE"
-  set_ack_impairment "$PROXY_MOBILE_RATE" "$PROXY_MOBILE_BASE_DELAY" "$PROXY_MOBILE_BASE_LOSS" "$PROXY_MOBILE_QUEUE_PROFILE"
-  ACTIVE_ACK_DELAY_EXTRA=""
-  setup_shapers "$BASE_RATE" "$PROXY_MOBILE_BASE_DELAY" "0%"
+  case "$direction" in
+    download|reverse|client_bound) mode="download"; role="china_download"; direction="download" ;;
+    upload|forward|proxy_bound) mode="upload"; role="china_upload"; direction="upload" ;;
+    bidir|bidirectional) mode="bidir"; role="china_bidirectional"; direction="bidirectional" ;;
+    *) die "Unknown PROXY_CHINA direction: ${direction}. Use download, upload, or bidirectional." ;;
+  esac
+  is_positive_integer "$parallel" || die "PROXY_CHINA_PARALLEL_SET entries must be positive integers; got ${parallel}"
+  allocate_port_block port 1
 
-  local flow_group case_tag event_file ss_file tc_file tag json_file stderr_file port t remaining pid ss_pid rc
-  flow_group="${scenario}_${algo}_r${repeat}"
+  case_label="${scenario}__china_${profile}__${direction}__P${parallel}"
+  flow_group="${case_label}_${algo}_r${repeat}"
   case_tag="$(safe_name "$flow_group")"
   event_file="${EVENTS_RAW_DIR}/${case_tag}.csv"
   ss_file="${SS_DIR}/${case_tag}.sslog"
   tc_file="${TC_DIR}/${case_tag}.tc"
-  tag="$(safe_name "${flow_group}_proxy_mobile_download_${algo}_p${BASE_PORT}")"
+  tag="$(safe_name "${flow_group}_${role}_${algo}_p${port}")"
   json_file="${JSON_DIR}/${tag}.json"
   stderr_file="${STDERR_DIR}/${tag}.stderr"
-  port="$BASE_PORT"
 
+  clear_policer
   event_log_init "$event_file"
-  event_log "$event_file" "proxy_mobile_start,${PROXY_MOBILE_RATE},${PROXY_MOBILE_BASE_DELAY},${PROXY_MOBILE_BASE_LOSS},,,phase=start;direction=download;queue=${PROXY_MOBILE_QUEUE_PROFILE};backhaul=${PROXY_BACKHAUL_RATE}"
+  proxy_china_apply_profile "$profile" setup
+  proxy_china_profile_params "$profile"
+  event_log "$event_file" "proxy_china_start_${profile}_${direction},client_bound:${PROXY_CHINA_DOWN_RATE};proxy_bound:${PROXY_CHINA_UP_RATE},client_bound:${PROXY_CHINA_DOWN_DELAY};proxy_bound:${PROXY_CHINA_UP_DELAY},client_bound:${PROXY_CHINA_DOWN_LOSS};proxy_bound:${PROXY_CHINA_UP_LOSS},,,phase=start;profile=${profile};direction=${direction};parallel=${parallel};queue=${PROXY_CHINA_QUEUE_PROFILE};jitter_down=${PROXY_CHINA_DOWN_JITTER};jitter_up=${PROXY_CHINA_UP_JITTER};slot=${PROXY_CHINA_SLOT_ARGS}"
 
   flush_tcp_metrics
   ss_pid="$(start_ss_logger "$ss_file" "$duration")"
   set +e
-  run_iperf_capture "$json_file" "$stderr_file" "$algo" "$duration" 1 "$port" download &
+  run_iperf_capture "$json_file" "$stderr_file" "$algo" "$duration" "$parallel" "$port" "$mode" &
   pid=$!
   set -e
 
   t=0
   sleep "$phase"; t=$((t + phase))
+  active_profile="$profile"
 
-  ACTIVE_ACK_DELAY_EXTRA="$PROXY_MOBILE_JITTER_EXTRA"
-  set_ack_impairment "$PROXY_MOBILE_RATE" "$PROXY_MOBILE_BASE_DELAY" "$PROXY_MOBILE_BASE_LOSS" "$PROXY_MOBILE_QUEUE_PROFILE"
-  change_shapers "$BASE_RATE" "$PROXY_MOBILE_BASE_DELAY" "0%"
-  event_log "$event_file" "proxy_mobile_jitter,${PROXY_MOBILE_RATE},${PROXY_MOBILE_BASE_DELAY},${PROXY_MOBILE_BASE_LOSS},,,phase=jitter;direction=download;extra=${PROXY_MOBILE_JITTER_EXTRA}"
-  sleep "$phase"; t=$((t + phase))
+  if proxy_china_bool_enabled "$PROXY_CHINA_ENABLE_PROFILE_SWING"; then
+    degraded="$(proxy_china_degraded_profile_for "$profile")"
+    active_profile="$degraded"
+    proxy_china_apply_profile "$active_profile" change
+    proxy_china_profile_params "$active_profile"
+    event_log "$event_file" "proxy_china_profile_swing_${profile}_to_${active_profile},client_bound:${PROXY_CHINA_DOWN_RATE};proxy_bound:${PROXY_CHINA_UP_RATE},client_bound:${PROXY_CHINA_DOWN_DELAY};proxy_bound:${PROXY_CHINA_UP_DELAY},client_bound:${PROXY_CHINA_DOWN_LOSS};proxy_bound:${PROXY_CHINA_UP_LOSS},,,phase=profile_swing;from=${profile};to=${active_profile};direction=${direction};jitter_down=${PROXY_CHINA_DOWN_JITTER};jitter_up=${PROXY_CHINA_UP_JITTER};slot=${PROXY_CHINA_SLOT_ARGS}"
+    sleep "$phase"; t=$((t + phase))
+  fi
 
-  ACTIVE_ACK_DELAY_EXTRA="$PROXY_MOBILE_LONGTAIL_EXTRA"
-  set_ack_impairment "$PROXY_MOBILE_DROP_RATE" "$PROXY_MOBILE_HIGH_DELAY" "$PROXY_MOBILE_SPIKE_LOSS" "$PROXY_MOBILE_QUEUE_PROFILE"
-  change_shapers "$BASE_RATE" "$PROXY_MOBILE_BASE_DELAY" "0%"
-  event_log "$event_file" "proxy_mobile_rate_drop_loss_jitter,${PROXY_MOBILE_DROP_RATE},${PROXY_MOBILE_HIGH_DELAY},${PROXY_MOBILE_SPIKE_LOSS},,,phase=rate_drop_loss;direction=download;extra=${PROXY_MOBILE_LONGTAIL_EXTRA}"
-  sleep "$phase"; t=$((t + phase))
+  if proxy_china_is_mobile_profile "$profile" && proxy_china_bool_enabled "$PROXY_CHINA_ENABLE_STALLS" && (( PROXY_CHINA_STALL_SECONDS > 0 )); then
+    proxy_china_apply_stall "$active_profile" "$PROXY_CHINA_STALL_TARGET"
+    proxy_china_profile_params "$active_profile"
+    event_log "$event_file" "proxy_china_mobile_stall_${PROXY_CHINA_STALL_TARGET},client_bound:${PROXY_CHINA_DOWN_RATE};proxy_bound:${PROXY_CHINA_UP_RATE},client_bound:${PROXY_CHINA_DOWN_DELAY};proxy_bound:${PROXY_CHINA_UP_DELAY},stall:100%,,,phase=mobile_stall;profile=${active_profile};target=${PROXY_CHINA_STALL_TARGET};stall_seconds=${PROXY_CHINA_STALL_SECONDS}"
+    sleep "$PROXY_CHINA_STALL_SECONDS"
+    proxy_china_apply_profile "$active_profile" change
+    proxy_china_profile_params "$active_profile"
+    event_log "$event_file" "proxy_china_mobile_stall_recovery,client_bound:${PROXY_CHINA_DOWN_RATE};proxy_bound:${PROXY_CHINA_UP_RATE},client_bound:${PROXY_CHINA_DOWN_DELAY};proxy_bound:${PROXY_CHINA_UP_DELAY},client_bound:${PROXY_CHINA_DOWN_LOSS};proxy_bound:${PROXY_CHINA_UP_LOSS},,,phase=mobile_stall_recovery;profile=${active_profile};target=${PROXY_CHINA_STALL_TARGET}"
+    stall_remainder=$((phase - PROXY_CHINA_STALL_SECONDS))
+    if (( stall_remainder > 0 )); then
+      sleep "$stall_remainder"
+    fi
+    t=$((t + phase))
+  fi
 
-  ACTIVE_ACK_DELAY_EXTRA="$PROXY_MOBILE_JITTER_EXTRA"
-  set_ack_impairment "$PROXY_MOBILE_RATE" "$PROXY_MOBILE_BASE_DELAY" "$PROXY_MOBILE_RECOVERY_LOSS" "$PROXY_MOBILE_QUEUE_PROFILE"
-  change_shapers "$BASE_RATE" "$PROXY_MOBILE_BASE_DELAY" "0%"
-  event_log "$event_file" "proxy_mobile_partial_recovery,${PROXY_MOBILE_RATE},${PROXY_MOBILE_BASE_DELAY},${PROXY_MOBILE_RECOVERY_LOSS},,,phase=partial_recovery;direction=download;extra=${PROXY_MOBILE_JITTER_EXTRA}"
-  sleep "$phase"; t=$((t + phase))
-
-  ACTIVE_ACK_DELAY_EXTRA=""
-  set_ack_impairment "$PROXY_MOBILE_RATE" "$PROXY_MOBILE_BASE_DELAY" "$PROXY_MOBILE_SPIKE_LOSS" "$PROXY_MOBILE_QUEUE_PROFILE"
-  change_shapers "$BASE_RATE" "$PROXY_MOBILE_BASE_DELAY" "0%"
-  event_log "$event_file" "proxy_mobile_packet_drop_burst,${PROXY_MOBILE_RATE},${PROXY_MOBILE_BASE_DELAY},${PROXY_MOBILE_SPIKE_LOSS},,,phase=drop_burst;direction=download"
-  sleep "$phase"; t=$((t + phase))
-
-  ACTIVE_ACK_DELAY_EXTRA=""
-  set_ack_impairment "$PROXY_MOBILE_RATE" "$PROXY_MOBILE_BASE_DELAY" "$PROXY_MOBILE_BASE_LOSS" "$PROXY_MOBILE_QUEUE_PROFILE"
-  change_shapers "$BASE_RATE" "$PROXY_MOBILE_BASE_DELAY" "0%"
-  event_log "$event_file" "proxy_mobile_full_recovery,${PROXY_MOBILE_RATE},${PROXY_MOBILE_BASE_DELAY},${PROXY_MOBILE_BASE_LOSS},,,phase=full_recovery;direction=download"
+  proxy_china_apply_profile "$profile" change
+  proxy_china_profile_params "$profile"
+  event_log "$event_file" "proxy_china_restore_${profile},client_bound:${PROXY_CHINA_DOWN_RATE};proxy_bound:${PROXY_CHINA_UP_RATE},client_bound:${PROXY_CHINA_DOWN_DELAY};proxy_bound:${PROXY_CHINA_UP_DELAY},client_bound:${PROXY_CHINA_DOWN_LOSS};proxy_bound:${PROXY_CHINA_UP_LOSS},,,phase=restore;profile=${profile};direction=${direction}"
   sleep "$phase"; t=$((t + phase))
 
   remaining=$((duration - t))
@@ -3615,13 +3676,61 @@ run_profile_proxy_mobile_china() {
   kill "$ss_pid" 2>/dev/null || true
   wait "$ss_pid" 2>/dev/null || true
   capture_tc_state "$tc_file"
-  event_log "$event_file" "proxy_mobile_end,${PROXY_MOBILE_RATE},${PROXY_MOBILE_BASE_DELAY},${PROXY_MOBILE_BASE_LOSS},,,phase=end;direction=download"
+  event_log "$event_file" "proxy_china_end_${profile}_${direction},client_bound:${PROXY_CHINA_DOWN_RATE};proxy_bound:${PROXY_CHINA_UP_RATE},client_bound:${PROXY_CHINA_DOWN_DELAY};proxy_bound:${PROXY_CHINA_UP_DELAY},client_bound:${PROXY_CHINA_DOWN_LOSS};proxy_bound:${PROXY_CHINA_UP_LOSS},,,phase=end;profile=${profile};direction=${direction};parallel=${parallel}"
 
-  append_json_results "$json_file" "$scenario" proxy_mobile_download "$algo" "$repeat" 1 "$duration" "$rc" "$stderr_file" \
-    real_world_proxy_mobile_china "$flow_group" "mobile_user" \
-    "reverse_dynamic:${PROXY_MOBILE_BASE_DELAY}->jitter->${PROXY_MOBILE_HIGH_DELAY}->${PROXY_MOBILE_BASE_DELAY}" \
-    "forward:${PROXY_BACKHAUL_RATE};reverse:${PROXY_MOBILE_RATE}->${PROXY_MOBILE_DROP_RATE}->${PROXY_MOBILE_RATE}" \
-    "reverse_dynamic:${PROXY_MOBILE_BASE_LOSS}->${PROXY_MOBILE_SPIKE_LOSS}->${PROXY_MOBILE_RECOVERY_LOSS}->${PROXY_MOBILE_BASE_LOSS}" "" "0" "$ss_file" "$tc_file"
+  case "$direction" in
+    download)
+      data_rate_label="$PROXY_CHINA_DOWN_RATE"
+      data_delay_label="$PROXY_CHINA_DOWN_DELAY"
+      ;;
+    upload)
+      data_rate_label="$PROXY_CHINA_UP_RATE"
+      data_delay_label="$PROXY_CHINA_UP_DELAY"
+      ;;
+    *)
+      data_rate_label="fwd:${PROXY_CHINA_UP_RATE};rev:${PROXY_CHINA_DOWN_RATE}"
+      data_delay_label="fwd:${PROXY_CHINA_UP_DELAY};rev:${PROXY_CHINA_DOWN_DELAY}"
+      ;;
+  esac
+  loss_label="fwd:${PROXY_CHINA_UP_LOSS};rev:${PROXY_CHINA_DOWN_LOSS};loss_corr:${PROXY_CHINA_LOSS_CORR};stall_target:${PROXY_CHINA_STALL_TARGET};swing:${PROXY_CHINA_ENABLE_PROFILE_SWING};stall:${PROXY_CHINA_ENABLE_STALLS}"
+  append_json_results "$json_file" "$case_label" "$role" "$algo" "$repeat" "$parallel" "$duration" "$rc" "$stderr_file" \
+    "real_world_proxy_mobile_china_${profile}" "$flow_group" "china_client" \
+    "$data_delay_label" \
+    "$data_rate_label" \
+    "$loss_label" "" "0" "$ss_file" "$tc_file"
+}
+
+run_profile_proxy_mobile_china() {
+  local scenario="$1" algo="$2" repeat="$3"
+  local save_rate save_active save_delay save_ack save_ack_delay save_ack_loss save_queue save_ack_queue save_data_extra save_ack_extra save_queue_mode save_queue_packets save_queue_ack_packets
+  save_rate="$BASE_RATE"
+  save_active="$ACTIVE_BASE_RATE"
+  save_delay="$ACTIVE_ONEWAY_DELAY"
+  save_ack="$ACTIVE_ACK_RATE"
+  save_ack_delay="$ACTIVE_ACK_DELAY"
+  save_ack_loss="$ACTIVE_ACK_LOSS"
+  save_queue="$ACTIVE_QUEUE_PROFILE"
+  save_ack_queue="$ACTIVE_ACK_QUEUE_PROFILE"
+  save_data_extra="$ACTIVE_DATA_DELAY_EXTRA"
+  save_ack_extra="$ACTIVE_ACK_DELAY_EXTRA"
+  save_queue_mode="$QUEUE_MODE"
+  save_queue_packets="$QUEUE_PACKETS"
+  save_queue_ack_packets="$QUEUE_ACK_PACKETS"
+
+  is_positive_integer "$PROXY_CHINA_PHASE_SECONDS" || die "PROXY_CHINA_PHASE_SECONDS must be a positive integer"
+  is_nonnegative_integer "$PROXY_CHINA_STALL_SECONDS" || die "PROXY_CHINA_STALL_SECONDS must be a non-negative integer"
+
+  local profile direction parallel
+  for profile in $PROXY_CHINA_PROFILE_SET; do
+    # Validate profile early and populate globals for metadata/logging.
+    proxy_china_profile_params "$profile"
+    for direction in $PROXY_CHINA_DIRECTION_SET; do
+      for parallel in $PROXY_CHINA_PARALLEL_SET; do
+        run_profile_proxy_mobile_china_case "$scenario" "$algo" "$repeat" "$profile" "$direction" "$parallel"
+        competition_cooldown
+      done
+    done
+  done
 
   BASE_RATE="$save_rate"
   ACTIVE_BASE_RATE="$save_active"
@@ -3633,6 +3742,9 @@ run_profile_proxy_mobile_china() {
   ACTIVE_ACK_QUEUE_PROFILE="$save_ack_queue"
   ACTIVE_DATA_DELAY_EXTRA="$save_data_extra"
   ACTIVE_ACK_DELAY_EXTRA="$save_ack_extra"
+  QUEUE_MODE="$save_queue_mode"
+  QUEUE_PACKETS="$save_queue_packets"
+  QUEUE_ACK_PACKETS="$save_queue_ack_packets"
   clear_policer
 }
 
@@ -3643,6 +3755,11 @@ run_scenario() {
   local active_delay scenario_label comp_algo impairment
   active_delay="$(current_delay)"
   scenario_label="$(scenario_with_latency "$scenario")"
+
+  if is_all_algo_competition_scenario "$scenario" && ! should_run_all_algo_competition_once "$algo"; then
+    log "Scenario=${scenario} latency=${active_delay} rate=${BASE_RATE} already runs all algorithms together; skipping duplicate driver algo=${algo} repeat=${repeat}"
+    return 0
+  fi
 
   log "Scenario=${scenario} latency=${active_delay} rate=${BASE_RATE} algo=${algo} repeat=${repeat}"
   reset_ack_impairment
@@ -3678,73 +3795,32 @@ run_scenario() {
     capacity_drop)
       run_with_dynamic_change "$scenario_label" "$algo" "$repeat" capacity_drop
       ;;
-    flow_join)
-      for comp_algo in "${COMPETITOR_ALGO_LIST[@]}"; do
-        run_competitor_test "$algo" "$repeat" "$comp_algo" "$scenario_label"
-        competition_cooldown
-      done
-      ;;
     flow_fairness)
-      for comp_algo in "${COMPETITOR_ALGO_LIST[@]}"; do
-        run_multiflow_competition "$algo" "$repeat" "$comp_algo" "$scenario_label"
-        competition_cooldown
-      done
+      run_all_algo_fairness_impairment "$repeat" "$scenario_label" clean
       ;;
     flow_fairness_sustain_loss)
-      impairment="sustain_loss"
-      for comp_algo in "${COMPETITOR_ALGO_LIST[@]}"; do
-        run_flow_fairness_impairment "$algo" "$repeat" "$comp_algo" "$scenario_label" "$impairment"
-        competition_cooldown
-      done
+      run_all_algo_fairness_impairment "$repeat" "$scenario_label" sustain_loss
       ;;
     flow_fairness_loss_spike)
-      impairment="loss_spike"
-      for comp_algo in "${COMPETITOR_ALGO_LIST[@]}"; do
-        run_flow_fairness_impairment "$algo" "$repeat" "$comp_algo" "$scenario_label" "$impairment"
-        competition_cooldown
-      done
+      run_all_algo_fairness_impairment "$repeat" "$scenario_label" loss_spike
       ;;
     flow_fairness_latency_spike)
-      impairment="latency_spike"
-      for comp_algo in "${COMPETITOR_ALGO_LIST[@]}"; do
-        run_flow_fairness_impairment "$algo" "$repeat" "$comp_algo" "$scenario_label" "$impairment"
-        competition_cooldown
-      done
+      run_all_algo_fairness_impairment "$repeat" "$scenario_label" latency_spike
       ;;
     flow_fairness_capacity_drop)
-      impairment="capacity_drop"
-      for comp_algo in "${COMPETITOR_ALGO_LIST[@]}"; do
-        run_flow_fairness_impairment "$algo" "$repeat" "$comp_algo" "$scenario_label" "$impairment"
-        competition_cooldown
-      done
+      run_all_algo_fairness_impairment "$repeat" "$scenario_label" capacity_drop
       ;;
     flow_fairness_policer)
-      impairment="policer"
-      for comp_algo in "${COMPETITOR_ALGO_LIST[@]}"; do
-        run_flow_fairness_impairment "$algo" "$repeat" "$comp_algo" "$scenario_label" "$impairment"
-        competition_cooldown
-      done
+      run_all_algo_fairness_impairment "$repeat" "$scenario_label" policer
       ;;
     flow_fairness_ack_limit)
-      impairment="ack_limit"
-      for comp_algo in "${COMPETITOR_ALGO_LIST[@]}"; do
-        run_flow_fairness_impairment "$algo" "$repeat" "$comp_algo" "$scenario_label" "$impairment"
-        competition_cooldown
-      done
+      run_all_algo_fairness_impairment "$repeat" "$scenario_label" ack_limit
       ;;
     flow_fairness_jitter)
-      impairment="jitter"
-      for comp_algo in "${COMPETITOR_ALGO_LIST[@]}"; do
-        run_flow_fairness_impairment "$algo" "$repeat" "$comp_algo" "$scenario_label" "$impairment"
-        competition_cooldown
-      done
+      run_all_algo_fairness_impairment "$repeat" "$scenario_label" jitter
       ;;
     flow_fairness_reorder)
-      impairment="reorder"
-      for comp_algo in "${COMPETITOR_ALGO_LIST[@]}"; do
-        run_flow_fairness_impairment "$algo" "$repeat" "$comp_algo" "$scenario_label" "$impairment"
-        competition_cooldown
-      done
+      run_all_algo_fairness_impairment "$repeat" "$scenario_label" reorder
       ;;
     policer_static)
       setup_shapers "$BASE_RATE" "$active_delay" "0%"
@@ -3782,18 +3858,6 @@ run_scenario() {
     short_flow_under_load)
       run_short_flow_under_load "$scenario_label" "$algo" "$repeat"
       ;;
-    flow_churn)
-      for comp_algo in "${COMPETITOR_ALGO_LIST[@]}"; do
-        run_flow_churn_test "$scenario_label" "$algo" "$repeat" "$comp_algo"
-        competition_cooldown
-      done
-      ;;
-    profile_seedbox_torrent_upload)
-      for comp_algo in "${COMPETITOR_ALGO_LIST[@]}"; do
-        run_profile_seedbox_torrent_upload "$scenario_label" "$algo" "$repeat" "$comp_algo"
-        competition_cooldown
-      done
-      ;;
     profile_proxy_mobile_china)
       run_profile_proxy_mobile_china "$scenario_label" "$algo" "$repeat"
       ;;
@@ -3811,12 +3875,12 @@ run_scenario() {
 
 
 generate_analysis_reports() {
-  python3 - "$SCHEMA_VERSION" "$RUN_ID" "$SUMMARY_CSV" "$INTERVALS_CSV" "$SCENARIO_ALGO_CSV" "$FLOW_FAIRNESS_CSV" "$FLOW_JOIN_OVERLAP_CSV" "$FAILURES_CSV" "$PING_CSV" "$QUEUE_CSV" "$BUFFERBLOAT_CSV" "$BUFFERBLOAT_ALGO_CSV" "$BUFFERBLOAT_QUEUE_CSV" "$METRICS_CSV" "$ANALYSIS_REPORT" "$PING_INTERVAL" "$BB_IDLE_SECONDS" "$BB_LOAD_DURATION" "$BB_RECOVERY_SECONDS" "$BB_SAMPLE_VALID_MIN_RATIO" "$HIGH_LATENCY_THRESHOLD_MS" "$HIGH_LATENCY_BASE_DURATION" <<'PYREPORT'
+  python3 - "$SCHEMA_VERSION" "$RUN_ID" "$SUMMARY_CSV" "$INTERVALS_CSV" "$SCENARIO_ALGO_CSV" "$FLOW_FAIRNESS_CSV" "$FAILURES_CSV" "$PING_CSV" "$QUEUE_CSV" "$BUFFERBLOAT_CSV" "$BUFFERBLOAT_ALGO_CSV" "$BUFFERBLOAT_QUEUE_CSV" "$METRICS_CSV" "$ANALYSIS_REPORT" "$PING_INTERVAL" "$BB_IDLE_SECONDS" "$BB_LOAD_DURATION" "$BB_RECOVERY_SECONDS" "$BB_SAMPLE_VALID_MIN_RATIO" "$HIGH_LATENCY_THRESHOLD_MS" "$HIGH_LATENCY_BASE_DURATION" <<'PYREPORT'
 import csv, math, re, statistics, sys
 from collections import defaultdict
 
 (schema_version, run_id, summary_path, intervals_path, scenario_algo_csv, fairness_csv,
- overlap_csv, failures_csv, ping_csv, queue_csv, bufferbloat_csv,
+ failures_csv, ping_csv, queue_csv, bufferbloat_csv,
  bufferbloat_algo_csv, bufferbloat_queue_csv, metrics_csv, analysis_report,
  ping_interval_s, bb_idle_seconds, bb_load_duration, bb_recovery_seconds,
  bb_sample_valid_min_ratio, high_latency_threshold_ms,
@@ -3937,9 +4001,15 @@ with open(failures_csv, "w", newline="") as f:
 # Scenario/algo primary summaries.
 groups = defaultdict(list)
 for r in rows:
-    if r.get("role") != "primary":
+    fam = r.get("scenario_family") or scenario_family(r.get("scenario", ""))
+    variant = r.get("variant", "")
+    # Pairwise-era summaries only counted the primary row because each algorithm
+    # became primary in a separate case. All-algorithm fairness cases run once,
+    # so include every participant algorithm in the per-algo summary.
+    include_row = r.get("role") == "primary" or (fam.startswith("flow_fairness") and variant.startswith("all_algos_"))
+    if not include_row:
         continue
-    key = (scenario_family(r.get("scenario","")), r.get("algo",""), r.get("variant",""))
+    key = (fam, r.get("algo",""), variant)
     groups[key].append(r)
 with open(scenario_algo_csv, "w", newline="") as f:
     w = csv.writer(f)
@@ -3976,63 +4046,6 @@ with open(fairness_csv, "w", newline="") as f:
         comp = sum(fnum(r.get("receiver_mbps")) or 0 for r in rs if r.get("role","").startswith("competitor"))
         algos = ";".join(f"{r.get('role')}:{r.get('algo')}" for r in rs)
         w.writerow([scen, rs[0].get("variant",""), fg, len(vals), f"{sum(vals):.6f}", f"{jain(vals):.6f}" if vals else "", f"{primary:.6f}", f"{comp:.6f}", algos])
-
-# Overlap-only throughput for flow_join groups.
-summary_by_fg = defaultdict(list)
-for r in rows:
-    if "flow_join" in r.get("scenario",""):
-        summary_by_fg[r.get("flow_group","")].append(r)
-intervals_by_fg_role = defaultdict(list)
-for it in intervals:
-    if "flow_join" not in it.get("scenario",""):
-        continue
-    omitted = str(it.get("omitted","")).lower()
-    if omitted in ("true", "1", "yes"):
-        continue
-    intervals_by_fg_role[(it.get("flow_group",""), it.get("role",""))].append(it)
-
-overlap_rows = []
-for fg, rs in summary_by_fg.items():
-    successful = [r for r in rs if is_success(r)]
-    if len(successful) < 2:
-        continue
-    starts = []
-    ends = []
-    for r in successful:
-        st = fnum(r.get("start_offset_seconds")) or 0.0
-        dur = fnum(r.get("actual_seconds")) or fnum(r.get("requested_seconds")) or 0.0
-        starts.append(st)
-        ends.append(st + dur)
-    overlap_start = max(starts)
-    overlap_end = min(ends)
-    if overlap_end <= overlap_start:
-        continue
-    for r in successful:
-        role = r.get("role","")
-        total = 0.0
-        weighted = 0.0
-        retrans = 0.0
-        for it in intervals_by_fg_role.get((fg, role), []):
-            st = fnum(it.get("absolute_start"))
-            en = fnum(it.get("absolute_end"))
-            mbps = fnum(it.get("mbps"))
-            rt = fnum(it.get("retransmits")) or 0.0
-            if st is None or en is None or mbps is None:
-                continue
-            clip_start = max(st, overlap_start)
-            clip_end = min(en, overlap_end)
-            if clip_end <= clip_start:
-                continue
-            sec = clip_end - clip_start
-            total += sec
-            weighted += mbps * sec
-            retrans += rt
-        overlap_mbps = weighted / total if total > 0 else None
-        overlap_rows.append([r.get("scenario",""), r.get("variant",""), fg, role, r.get("algo",""), r.get("peer_algo",""), f"{overlap_start:.6f}", f"{overlap_end:.6f}", f"{total:.6f}", f"{overlap_mbps:.6f}" if overlap_mbps is not None else "", f"{retrans:.0f}"])
-with open(overlap_csv, "w", newline="") as f:
-    w = csv.writer(f)
-    w.writerow(["scenario", "variant", "flow_group", "role", "algo", "peer_algo", "overlap_start", "overlap_end", "overlap_seconds", "overlap_rx_mbps", "overlap_retrans"])
-    w.writerows(overlap_rows)
 
 # Bufferbloat / latency-under-load summaries from ping probes.
 ping_groups = defaultdict(list)
@@ -4222,11 +4235,6 @@ with open(metrics_csv, "w", newline="") as f:
         add_metric(mw, case_id, "flow_fairness", "fairness", sf, scen, r.get("variant", ""), r.get("flow_group", ""), "", "", "", "", "", "", "", "value", "jain_fairness", r.get("jain_fairness", ""), "ratio", r.get("flow_count", ""), "flow-fairness.csv")
         add_metric(mw, case_id, "flow_fairness", "throughput", sf, scen, r.get("variant", ""), r.get("flow_group", ""), "", "", "", "", "", "", "", "sum", "total_rx_mbps", r.get("total_rx_mbps", ""), "mbps", r.get("flow_count", ""), "flow-fairness.csv")
 
-    for r in read_csv(overlap_csv):
-        scen = r.get("scenario", ""); sf = scenario_family(scen); case_id = r.get("flow_group", "")
-        add_metric(mw, case_id, "flow_join_overlap", "throughput", sf, scen, r.get("variant", ""), r.get("flow_group", ""), r.get("algo", ""), r.get("peer_algo", ""), r.get("role", ""), "", "", "", "", "weighted_mean", "overlap_rx_mbps", r.get("overlap_rx_mbps", ""), "mbps", r.get("overlap_seconds", ""), "flow-join-overlap.csv")
-        add_metric(mw, case_id, "flow_join_overlap", "retransmit", sf, scen, r.get("variant", ""), r.get("flow_group", ""), r.get("algo", ""), r.get("peer_algo", ""), r.get("role", ""), "", "", "", "", "sum", "overlap_retrans", r.get("overlap_retrans", ""), "count", r.get("overlap_seconds", ""), "flow-join-overlap.csv")
-
     for r in read_csv(bufferbloat_csv):
         scen = r.get("scenario", ""); sf = scenario_family(scen); case_id = r.get("flow_group", "")
         for stat, col, name, unit in [("p50", "idle_p50_ms", "idle_rtt", "ms"), ("p50", "loaded_p50_ms", "loaded_rtt", "ms"), ("p95", "loaded_p95_ms", "loaded_rtt", "ms"), ("p99", "loaded_p99_ms", "loaded_rtt", "ms"), ("max", "loaded_max_ms", "loaded_rtt", "ms"), ("delta_p50", "bufferbloat_delta_p50_ms", "loaded_minus_idle", "ms"), ("delta_p95", "bufferbloat_delta_p95_ms", "loaded_minus_idle", "ms"), ("p95_est", "queue_est_p95_kbytes", "estimated_queue", "kbytes"), ("p50", "recovery_p50_ms", "recovery_rtt", "ms")]:
@@ -4257,7 +4265,6 @@ with open(analysis_report, "w") as f:
     f.write("## Convenience analysis views\n\n")
     f.write(f"- `{scenario_algo_csv}`\n")
     f.write(f"- `{fairness_csv}`\n")
-    f.write(f"- `{overlap_csv}`\n")
     f.write(f"- `{bufferbloat_csv}`\n")
     f.write(f"- `{bufferbloat_algo_csv}`\n")
     f.write(f"- `{bufferbloat_queue_csv}`\n\n")
@@ -4278,7 +4285,6 @@ with open(analysis_report, "w") as f:
     f.write("## Notes\n\n")
     f.write("- Bufferbloat scenarios now default to `pfifo_deep`, an unmanaged deep FIFO implemented as a deep netem FIFO at the router bottleneck. Use `BUFFERBLOAT_QUEUE_PROFILE=fq|fq_codel|cake` only for separate managed-queue comparisons.\n")
     f.write("- Bufferbloat views include RTT inflation, estimated queue size from RTT inflation, sample-count validity flags, and direct qdisc backlog samples from `data/queue_samples.csv`.\n")
-    f.write("- For flow_join, use `data/flow-join-overlap.csv` or `data/metrics.csv` rows with `metric_scope=flow_join_overlap`; whole-run averages include non-overlap time.\n")
     f.write("- For flow_fairness, use `data/flow-fairness.csv` or `data/metrics.csv` rows with `metric_name=jain_fairness`. Values closer to 1.0 are fairer.\n")
     f.write("- `retrans_per_gbit` in `data/runs.csv` normalizes retransmissions by delivered data.\n")
     f.write("- Bufferbloat views compare idle RTT with loaded RTT; `delta_p95` is loaded p95 minus idle p50.\n")
@@ -4302,7 +4308,7 @@ expand_test_groups() {
   for group in $1; do
     case "$group" in
       standard)
-        items="baseline latency_spike latency_reduction jitter_long_tail capacity_drop sustain_loss loss_spike policer_static policer_spike policer_adaptive_rate policer_adaptive_retrans ack_rate_limit flow_join flow_fairness short_flow_under_load bufferbloat_upload bufferbloat_download bufferbloat_bidirectional profile_seedbox_torrent_upload profile_proxy_mobile_china"
+        items="baseline latency_spike latency_reduction jitter_long_tail capacity_drop sustain_loss loss_spike policer_static policer_spike policer_adaptive_rate policer_adaptive_retrans ack_rate_limit flow_fairness short_flow_under_load bufferbloat_upload bufferbloat_download bufferbloat_bidirectional profile_proxy_mobile_china"
         ;;
       core)
         items="baseline latency_spike latency_reduction capacity_drop"
@@ -4317,7 +4323,7 @@ expand_test_groups() {
         items="policer_static policer_spike policer_adaptive_rate policer_adaptive_retrans"
         ;;
       competition)
-        items="flow_join flow_fairness flow_fairness_sustain_loss flow_fairness_loss_spike flow_fairness_latency_spike flow_fairness_capacity_drop flow_fairness_policer flow_fairness_ack_limit flow_fairness_jitter flow_fairness_reorder flow_churn"
+        items="flow_fairness flow_fairness_sustain_loss flow_fairness_loss_spike flow_fairness_latency_spike flow_fairness_capacity_drop flow_fairness_policer flow_fairness_ack_limit flow_fairness_jitter flow_fairness_reorder"
         ;;
       flow_fairness)
         items="flow_fairness flow_fairness_sustain_loss flow_fairness_loss_spike flow_fairness_latency_spike flow_fairness_capacity_drop flow_fairness_policer flow_fairness_ack_limit flow_fairness_jitter flow_fairness_reorder"
@@ -4332,13 +4338,13 @@ expand_test_groups() {
         items="short_flow_repeated short_flow_under_load"
         ;;
       real_world_profiles)
-        items="profile_seedbox_torrent_upload profile_proxy_mobile_china"
+        items="profile_proxy_mobile_china"
         ;;
       combined)
         items="combined_all"
         ;;
       all)
-        items="baseline latency_spike latency_reduction jitter_light jitter_heavy jitter_long_tail reorder_light reorder_heavy capacity_drop sustain_loss loss_bursts loss_spike policer_static policer_spike policer_adaptive_rate policer_adaptive_retrans ack_rate_limit ack_loss ack_delay_spike ack_bufferbloat flow_join flow_fairness flow_fairness_sustain_loss flow_fairness_loss_spike flow_fairness_latency_spike flow_fairness_capacity_drop flow_fairness_policer flow_fairness_ack_limit flow_fairness_jitter flow_fairness_reorder flow_churn short_flow_repeated short_flow_under_load bufferbloat_upload bufferbloat_download bufferbloat_bidirectional profile_seedbox_torrent_upload profile_proxy_mobile_china combined_all"
+        items="baseline latency_spike latency_reduction jitter_light jitter_heavy jitter_long_tail reorder_light reorder_heavy capacity_drop sustain_loss loss_bursts loss_spike policer_static policer_spike policer_adaptive_rate policer_adaptive_retrans ack_rate_limit ack_loss ack_delay_spike ack_bufferbloat flow_fairness flow_fairness_sustain_loss flow_fairness_loss_spike flow_fairness_latency_spike flow_fairness_capacity_drop flow_fairness_policer flow_fairness_ack_limit flow_fairness_jitter flow_fairness_reorder short_flow_repeated short_flow_under_load bufferbloat_upload bufferbloat_download bufferbloat_bidirectional profile_proxy_mobile_china combined_all"
         ;;
       *)
         items="$group"
@@ -4371,7 +4377,7 @@ rate_values_for_scenario() {
       ;;
   esac
   case "$scenario" in
-    profile_seedbox_torrent_upload) values="$SEEDBOX_UPLINK_RATE" ;;
+    flow_fairness|flow_fairness_*) values="$COMPETITION_RECEIVER_RATE" ;;
     profile_proxy_mobile_china) values="$PROXY_BACKHAUL_RATE" ;;
   esac
 
@@ -4418,13 +4424,16 @@ requested_has_parallel_scenario() {
 }
 
 parallel_worker_count() {
-  local workers="${PARALLEL_WORKERS:-1}"
+  local workers="${PARALLEL_WORKERS:-1}" cores
   if [[ "$workers" == "auto" ]]; then
-    workers="$(nproc 2>/dev/null || printf '2\n')"
-    # Keep the default auto cap conservative; iperf3/netem tests are still CPU
-    # and scheduler sensitive even when each worker uses its own namespaces.
-    if is_positive_integer "$workers" && (( workers > 4 )); then
-      workers=4
+    cores="$(nproc 2>/dev/null || printf '2\n')"
+    if is_positive_integer "$cores"; then
+      workers=$(( cores / 2 ))
+      if (( workers < 1 )); then
+        workers=1
+      fi
+    else
+      workers=1
     fi
   fi
   if ! is_positive_integer "$workers"; then
@@ -4609,7 +4618,7 @@ run_lightweight_parallel_parent() {
 
   merge_lightweight_parallel_outputs "$workers_root"
   generate_analysis_reports
-  log "Analysis reports: ${ANALYSIS_REPORT}, ${SCENARIO_ALGO_CSV}, ${FLOW_FAIRNESS_CSV}, ${FLOW_JOIN_OVERLAP_CSV}, ${FAILURES_CSV}, ${METRICS_CSV}, ${BUFFERBLOAT_CSV}, ${BUFFERBLOAT_ALGO_CSV}, ${BUFFERBLOAT_QUEUE_CSV}"
+  log "Analysis reports: ${ANALYSIS_REPORT}, ${SCENARIO_ALGO_CSV}, ${FLOW_FAIRNESS_CSV}, ${FAILURES_CSV}, ${METRICS_CSV}, ${BUFFERBLOAT_CSV}, ${BUFFERBLOAT_ALGO_CSV}, ${BUFFERBLOAT_QUEUE_CSV}"
   if (( failures > 0 )); then
     log "Done with ${failures} failed worker process(es). Results saved in ${OUT_DIR}"
     return 1
@@ -4676,9 +4685,9 @@ main() {
 
   # Generate the compact, decision-oriented report last. It replaces the old
   # enormous row dump and also writes the derived CSVs used for fairness,
-  # retransmit-efficiency, failure, and overlap-only competitor analysis.
+  # retransmit-efficiency and failure analysis.
   generate_analysis_reports
-  log "Analysis reports: ${ANALYSIS_REPORT}, ${SCENARIO_ALGO_CSV}, ${FLOW_FAIRNESS_CSV}, ${FLOW_JOIN_OVERLAP_CSV}, ${FAILURES_CSV}, ${METRICS_CSV}, ${BUFFERBLOAT_CSV}, ${BUFFERBLOAT_ALGO_CSV}, ${BUFFERBLOAT_QUEUE_CSV}"
+  log "Analysis reports: ${ANALYSIS_REPORT}, ${SCENARIO_ALGO_CSV}, ${FLOW_FAIRNESS_CSV}, ${FAILURES_CSV}, ${METRICS_CSV}, ${BUFFERBLOAT_CSV}, ${BUFFERBLOAT_ALGO_CSV}, ${BUFFERBLOAT_QUEUE_CSV}"
   log "Done. Results saved in ${OUT_DIR}"
 }
 

@@ -1,33 +1,37 @@
 # BBRInstall
 
+[简体中文](README.zh-CN.md)
+
 A Debian/Ubuntu installer for BBR-family TCP congestion-control algorithms.
 
-
-- **`bbrv3`**: installs a prebuilt Linux kernel image and matching headers package, then configures the kernel congestion-control setting to `bbr`.
-- **`bbrx`, `bbrw`, `bbr_brutal`, `bbrw_brutal`**: downloads the selected module source, builds it with DKMS for the currently running kernel, loads the module, enables autoload at boot, and configures the selected algorithm.
+- **`bbrv3`** installs a prebuilt Linux kernel image and matching headers package, then configures the active congestion-control name as `bbr`.
+- **`bbrx`, `bbrw`, `bbr_brutal`, and `bbrw_brutal`** download the selected module source, build it with DKMS for the currently running kernel, load the module, enable boot-time autoload, and configure the selected algorithm.
 
 > **Warning**
 >
-> This script changes kernel-level networking behavior and must run as `root`. Review the script and the upstream source location before running it on a production host.
+> This script changes kernel-level networking behavior and must run as `root`. Review the script and the configured upstream source before using it on a production host.
 
 ---
+
 ## Supported systems
 
-| Platform | Supported versions
+| Platform | Supported versions |
 |---|---|
-| Debian | 11, 12, 13
-| Ubuntu | 22.04, 24.04, 26.04
+| Debian | 11, 12, 13 |
+| Ubuntu | 20.04, 22.04, 24.04, 26.04 |
 
 Runtime support:
 
-- Bare-metal hosts and full virtual machines are expected to work.
+- Bare-metal hosts and full virtual machines are the intended environments.
 - Containers are blocked by default because they share the host kernel.
-- WSL is blocked by default because this type of kernel/DKMS installation is not appropriate there.
-- `--force-runtime` exists for testing or unusual environments, but it should not be used on production systems unless you understand the kernel/runtime boundary.
+- WSL is blocked by default because this kind of kernel/DKMS installation is not appropriate there.
+- `--force-runtime` exists for tests or unusual environments, but do not use it on production systems unless you understand the kernel/runtime boundary.
 
-Architecture and kernel limitations:
+Architecture and kernel notes:
+
 - DKMS-based algorithms require a running kernel version in the configured range, defaulting to **5.10 through 7.1.x**.
-- DKMS-based algorithms require matching kernel headers for the currently running kernel.
+- DKMS-based algorithms first try to use matching headers for the currently running kernel. If those headers cannot be found or installed, the script falls back to the distribution generic kernel image and headers. In headless/non-interactive mode, that fallback is automatic.
+- `bbrv3` uses prebuilt kernel packages. The current package layout supports amd64/x86_64 for the listed Debian/Ubuntu versions, and arm64/aarch64 for Debian 13.
 
 ---
 
@@ -36,11 +40,10 @@ Architecture and kernel limitations:
 Minimum practical requirements:
 
 - Root privileges.
-- Debian or Ubuntu host matching the supported version list.
+- A supported Debian or Ubuntu host.
 - `bash`, `apt-get`, `dpkg`, `uname`, `awk`, `sed`, `grep`, and `sha256sum`.
 - Internet access to the configured `RAW_BASE` source.
-- For DKMS algorithms: `dkms`, `build-essential`, `kmod`, and matching `linux-headers-$(uname -r)`. The script will attempt to install missing build dependencies.
-
+- For DKMS algorithms: `dkms`, `build-essential`, `kmod`, and matching `linux-headers-$(uname -r)`. The script attempts to install missing build dependencies and exact running-kernel headers. If exact headers are unavailable, it installs the distribution generic kernel image and headers, then asks you to reboot and rerun the installer.
 
 Recommended before running:
 
@@ -53,18 +56,65 @@ sudo apt-get install -y ca-certificates curl
 
 ## Quick start
 
+Download the script, review it, then run it with the algorithm you want:
+
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBRInstall.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBRInstall.sh) --algo bbrx
+```
+In non-interactive mode, always provide `--algo` or `BBR_ALGO`.
+
+---
+
+## Headless header fallback
+
+For DKMS-based algorithms, the installer first checks `/lib/modules/$(uname -r)/build` and then tries to install `linux-headers-$(uname -r)`. If exact running-kernel headers still cannot be used, it falls back to the distribution generic kernel packages:
+
+| Platform | Generic packages |
+|---|---|
+| Debian amd64/x86_64 | `linux-image-amd64` and `linux-headers-amd64` |
+| Debian arm64/aarch64 | `linux-image-arm64` and `linux-headers-arm64` |
+| Ubuntu | `linux-image-generic` and `linux-headers-generic` |
+
+In a terminal session, the prompt defaults to **yes**. In headless/non-interactive mode, the installer does this automatically without prompting. After the generic image and headers are installed, reboot into the new kernel and rerun the same installer command.
+
+---
+
+## Language
+
+English is the default script output language. Simplified Chinese output is available with `--lang zh-CN` or `BBR_LANG=zh-CN`:
+
+```bash
+sudo bash /tmp/BBRInstall.sh --lang zh-CN --algo bbrw
 ```
 
+Supported language values:
+
+| Value | Meaning |
+|---|---|
+| `en` | English, default |
+| `zh-CN` | Simplified Chinese |
+
+---
+
+## Options
+
 ```text
+Usage: BBRInstall.sh [options]
+
 Options:
   --algo ALGO           Install one of: bbrv3 bbrx bbrw bbr_brutal bbrw_brutal
   --raw-base URL        Override source base URL. Can also use RAW_BASE=...
-  --upgrade-system      Run apt-get upgrade after apt-get update. Default: off
+  --lang LANG           Output language: en (default), zh-CN. Can also use BBR_LANG=...
   --force-runtime       Continue in unsupported runtimes such as containers/WSL
-  --no-clear            Do not clear the terminal
   -h, --help            Show this help
+```
+
+### `--algo ALGO`
+
+Selects the congestion-control algorithm non-interactively.
+
+```bash
+sudo bash /tmp/BBRInstall.sh --algo bbrx
 ```
 
 Supported algorithm values:
@@ -77,20 +127,6 @@ Supported algorithm values:
 | `bbr_brutal` | DKMS kernel module | `bbr_brutal` | Usually no; module is loaded immediately. |
 | `bbrw_brutal` | DKMS kernel module | `bbrw_brutal` | Usually no; module is loaded immediately. |
 
----
-
-## Options
-
-### `--algo ALGO`
-
-Selects the congestion-control algorithm non-interactively.
-
-Example:
-
-```bash
-bash <(wget -qO- https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBRInstall.sh) --algo bbrx
-```
-
 ### `--raw-base URL`
 
 Overrides the source URL used to download kernel packages, DKMS source files, `Makefile`, `dkms.conf`, and checksum files.
@@ -98,9 +134,17 @@ Overrides the source URL used to download kernel packages, DKMS source files, `M
 For stronger supply-chain control, prefer a trusted fork or a commit-pinned raw URL rather than a moving branch:
 
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBRInstall.sh) \
+sudo bash /tmp/BBRInstall.sh \
   --algo bbrv3 \
   --raw-base 'https://raw.githubusercontent.com/<owner>/<repo>/<commit>/BBR-Install/BBR'
+```
+
+### `--lang LANG`
+
+Sets the script output language. English is the default.
+
+```bash
+sudo bash /tmp/BBRInstall.sh --lang zh-CN --algo bbrw
 ```
 
 ### `--force-runtime`
@@ -117,6 +161,7 @@ Most CLI options can also be controlled with environment variables.
 
 | Variable | Purpose |
 |---|---|
+| `BBR_LANG` | Same as `--lang`. Supported values: `en`, `zh-CN`. Default: `en`. |
 | `BBR_ALGO` | Same as `--algo`. |
 | `RAW_BASE` | Same as `--raw-base`. |
 | `BBR_SYSCTL_DROPIN` | Override the managed sysctl drop-in path. Default: `/etc/sysctl.d/90-bbr-congestion-control.conf`. |
@@ -125,22 +170,33 @@ Most CLI options can also be controlled with environment variables.
 | `BBR_FORCE_UNSUPPORTED_RUNTIME=1` | Same as `--force-runtime`. |
 | `BBR_WORK_DIR` | Use a specific work directory instead of an auto-created temporary directory. |
 | `BBR_CLEAN_WORK_DIR=0` | Preserve the work directory after exit for debugging. |
-| `BBR_KERNEL_MIN_VERSION` | Advanced/test override for the minimum DKMS kernel version. |
-| `BBR_KERNEL_MAX_VERSION` | Advanced/test override for the maximum DKMS kernel version. |
+| `BBR_KERNEL_MIN_VERSION` | Advanced/test override for the minimum DKMS kernel version. Default: `5.10`. |
+| `BBR_KERNEL_MAX_VERSION` | Advanced/test override for the maximum DKMS kernel version. Default: `7.1.999`. |
+| `NO_COLOR=1` | Disable colored output. |
 
 When using environment variables with `sudo`, remember that many sudo configurations do not preserve environment variables by default. Use one of these patterns:
 
 ```bash
-sudo BBR_ALGO=bbrw ./.sh
+sudo BBR_ALGO=bbrw BBR_LANG=zh-CN ./BBRInstall.sh
 ```
 
 or:
 
 ```bash
-sudo -E ./.sh
+sudo -E ./BBRInstall.sh
 ```
 
 Use `sudo -E` only when you intentionally trust the inherited environment.
+
+---
+
+## What the installer changes
+
+- For all algorithms, the script writes the managed sysctl drop-in at `/etc/sysctl.d/90-bbr-congestion-control.conf` by default.
+- Before writing its managed drop-in, the script backs up and comments out local conflicting `net.ipv4.tcp_congestion_control` entries in `/etc/sysctl.conf` and other local sysctl drop-ins.
+- For DKMS algorithms, the script writes `/etc/modules-load.d/90-bbr-congestion-control.conf` by default so the module is loaded before sysctl settings are applied.
+- If current-kernel headers cannot be used for a DKMS algorithm, the script installs the distribution generic kernel image and headers. In non-interactive/headless mode this fallback is automatic; in interactive mode, pressing Enter accepts the default install action. The script exits afterward because you must reboot into the new kernel before DKMS can build the module.
+- For `bbrv3`, the script removes its managed module autoload file because the algorithm is provided by the installed kernel package, not a DKMS module.
 
 ---
 
@@ -266,17 +322,17 @@ Package names vary based on the upstream package set, so inspect `dpkg -l` befor
 
 ## Troubleshooting
 
-### `error: non-interactive mode requires --algo or BBR_ALGO`
+### `Error: non-interactive mode requires --algo or BBR_ALGO.`
 
 The script was run without a TTY. Specify the algorithm explicitly:
 
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/jerry048/Trove/refs/heads/main/BBR-Install/BBRInstall.sh) --algo bbrw
+sudo bash /tmp/BBRInstall.sh --algo bbrw
 ```
 
 ### `linux-headers-$(uname -r)` cannot be installed
 
-The running kernel may not have matching headers available from your APT repositories. Install the exact matching headers package, or boot into a kernel that has matching headers available.
+The running kernel may not have matching headers available from your APT repositories. The script first tries to install the exact `linux-headers-$(uname -r)` package. If that package is unavailable or unusable, it falls back to the distribution generic kernel image and headers.
 
 Useful checks:
 
@@ -285,6 +341,8 @@ uname -r
 ls -ld /lib/modules/$(uname -r)/build
 apt-cache policy linux-headers-$(uname -r)
 ```
+
+If exact headers are not available, the script falls back to the distribution generic kernel image and headers. In headless/non-interactive mode, it installs those packages automatically. In interactive mode, the prompt defaults to install (`Y`). After that, reboot into the new kernel and rerun the installer.
 
 ### DKMS build fails
 
@@ -327,7 +385,7 @@ sudo modprobe tcp_bbrw
 
 Replace `tcp_bbrw` with the module name for the selected algorithm.
 
-### bbrv3 installed but not active after reboot
+### `bbrv3` installed but not active after reboot
 
 Confirm that the machine booted into the new kernel:
 
@@ -342,4 +400,3 @@ sudo update-grub
 ```
 
 Cloud providers and VPS panels sometimes pin or override boot kernels. Check provider-specific boot settings if the new kernel does not appear.
-

@@ -146,8 +146,8 @@ This baseline matters because most variants in this guide do **not** rewrite all
 | **BBRv3** | Adds explicit loss/ECN modeling and a redesigned 4-phase bandwidth-probing cycle. | `bw_lo`, `bw_hi`, `inflight_lo`, `inflight_hi`, ECN state, loss thresholds, `UP/DOWN/CRUISE/REFILL` cycle. | Safer than Original BBR under congestion signals; generally better coexistence and lower loss, but more complex. |
 | **BBRx** | Keeps a BBRv1-like structure but greatly increases aggressiveness. | Higher startup gain, higher cwnd gain, 200-packet minimum cwnd, 600-second min-RTT window, +5% pacing formula. | Faster ramp and larger standing in-flight volume; higher risk of queue growth, loss, and unfairness. |
 | **BBRW** | Uses approximate RTT p95 instead of min RTT for BDP, and removes `PROBE_RTT`. | `rtt_p95_step_us`, streaming p95 estimator, no `BBR_PROBE_RTT` mode. | Smoother throughput and no periodic ProbeRTT dip; likely larger cwnd and more tolerance of jitter, but higher queue/latency risk. |
-| **BBR-Brutal** | Keeps BBR-style startup/drain and min-RTT ProbeRTT, but replaces steady probing with a 3-phase cycle and loss compensation. | `PROBE_UP`, `DRAIN`, `CRUISE`, `min_ack_percent`, `loss_guard_percent`, round-level loss tracking. | More throughput-seeking under moderate loss; potentially unfair or loss-amplifying on shared bottlenecks. |
-| **BBRW-Brutal** | Combines BBRW’s RTT-p95/no-ProbeRTT design with Brutal-style loss compensation. | RTT p95, 3-phase cycle, sample-level loss guard, compensation capped by min ACK percentage. | Highest risk/reward custom variant: may keep throughput through jitter/loss, but can build large queues and compete aggressively. |
+| **BBR-Brutal** | Keeps BBR-style startup/drain and min-RTT ProbeRTT, but replaces steady probing with a 8-phase cycle and loss compensation. | `PROBE_UP`, `DRAIN`, `CRUISE`, `min_ack_percent`, `loss_guard_percent`, round-level loss tracking. | More throughput-seeking under moderate loss; potentially unfair or loss-amplifying on shared bottlenecks. |
+| **BBRW-Brutal** | Combines BBRW’s RTT-p95/no-ProbeRTT design with Brutal-style loss compensation. | RTT p95, 8-phase cycle, sample-level loss guard, compensation capped by min ACK percentage. | Highest risk/reward custom variant: may keep throughput through jitter/loss, but can build large queues and compete aggressively. |
 
 ---
 
@@ -342,7 +342,7 @@ The `LOSS_GUARD` disables compensation when loss exceeds the configured guard th
 BBRW-Brutal combines the two custom ideas:
 
 1. BBRW’s approximate RTT p95 BDP model and no `PROBE_RTT`.
-2. Brutal-style three-phase steady probing and loss compensation.
+2. Brutal-style eight-phase steady probing and loss compensation.
 
 Its steady cycle is:
 
